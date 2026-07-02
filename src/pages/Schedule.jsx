@@ -245,7 +245,7 @@ export default function Schedule() {
             <tbody>
               {TIMES.map((time, timeIdx) => (
                 <tr key={time} style={{ height: `${ROW_HEIGHT}px` }}>
-                  <td className="time-cell" style={{ fontSize: "11px", padding: "0 8px", verticalAlign: "middle", textAlign: "right" }}>
+                  <td className="time-cell" style={{ fontSize: "11px", padding: "2px 8px 0", verticalAlign: "top", textAlign: "right" }}>
                     {time}
                   </td>
                   {DAYS.map(day => {

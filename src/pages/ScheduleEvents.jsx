@@ -3,18 +3,21 @@ import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, Timestamp } from "firebase/firestore";
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, Timestamp } from "firebase/firestore";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const TIMES = [
-  "6:00 AM","6:30 AM","7:00 AM","7:30 AM","8:00 AM","8:30 AM",
-  "9:00 AM","9:30 AM","10:00 AM","10:30 AM","11:00 AM","11:30 AM",
-  "12:00 PM","12:30 PM","1:00 PM","1:30 PM","2:00 PM","2:30 PM",
-  "3:00 PM","3:30 PM","4:00 PM","4:30 PM","5:00 PM","5:30 PM",
-  "6:00 PM","6:30 PM","7:00 PM","7:30 PM","8:00 PM",
-];
+function generateTimeOptions() {
+  const options = [];
+  for (let hour = 6; hour <= 20; hour++) {   // 20 = 8:00 PM ceiling
+    const period = hour < 12 ? "AM" : "PM";
+    const displayHour = hour <= 12 ? hour : hour - 12;
+    options.push(`${displayHour}:00 ${period}`);
+  }
+  return options;
+}
+const TIMES = generateTimeOptions();
 
 const PlusIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -49,6 +52,7 @@ export default function ScheduleEvents() {
   const [current, setCurrent] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [form, setForm] = useState({ name: "", date: "", endDate: "", startTime: "8:00 AM", endTime: "9:00 AM" });
   const [loading, setLoading] = useState(false);
 
@@ -67,22 +71,27 @@ export default function ScheduleEvents() {
     setEvents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   }
 
-  async function handleAddEvent(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     const user = auth.currentUser;
     if (!user || !form.name || !form.date) return;
     setLoading(true);
     try {
-      await addDoc(collection(db, "events"), {
+      const data = {
         name: form.name,
         date: form.date,
         endDate: form.endDate || form.date,
         startTime: form.startTime,
         endTime: form.endTime,
         uid: user.uid,
-        createdAt: Timestamp.now(),
-      });
+      };
+      if (editingEvent) {
+        await updateDoc(doc(db, "events", editingEvent.id), data);
+      } else {
+        await addDoc(collection(db, "events"), { ...data, createdAt: Timestamp.now() });
+      }
       setForm({ name: "", date: "", endDate: "", startTime: "8:00 AM", endTime: "9:00 AM" });
+      setEditingEvent(null);
       setShowModal(false);
       fetchEvents();
     } catch (err) {
@@ -92,14 +101,33 @@ export default function ScheduleEvents() {
     }
   }
 
+  function openAddModal() {
+    setEditingEvent(null);
+    setForm({ name: "", date: "", endDate: "", startTime: "8:00 AM", endTime: "9:00 AM" });
+    setShowModal(true);
+  }
+
+  function openEditModal(ev) {
+    setEditingEvent(ev);
+    setForm({
+      name: ev.name,
+      date: ev.date,
+      endDate: ev.endDate || ev.date,
+      startTime: ev.startTime || "8:00 AM",
+      endTime: ev.endTime || "9:00 AM",
+    });
+    setShowModal(true);
+  }
+
   async function handleDelete(id) {
+    if (!window.confirm("Delete this event?")) return;
     await deleteDoc(doc(db, "events", id));
     fetchEvents();
   }
 
   function handleStartTime(val) {
     const idx = TIMES.indexOf(val);
-    const endIdx = Math.min(idx + 2, TIMES.length - 1);
+    const endIdx = Math.min(idx + 1, TIMES.length - 1);
     setForm({ ...form, startTime: val, endTime: TIMES[endIdx] });
   }
 
@@ -183,10 +211,18 @@ export default function ScheduleEvents() {
                                   key={ev.id}
                                   className="event-pill"
                                   title={`${ev.name}${ev.startTime ? ` · ${ev.startTime}–${ev.endTime}` : ""}`}
-                                  onClick={() => handleDelete(ev.id)}
-                                  style={{ cursor: "pointer", whiteSpace: "normal", overflow: "visible", textOverflow: "unset" }}
+                                  onClick={() => openEditModal(ev)}
+                                  style={{
+                                    cursor: "pointer", whiteSpace: "normal", overflow: "visible", textOverflow: "unset",
+                                    display: "inline-flex", alignItems: "center", gap: "5px",
+                                  }}
                                 >
                                   {ev.name}
+                                  <span
+                                    onClick={e => { e.stopPropagation(); handleDelete(ev.id); }}
+                                    title="Delete"
+                                    style={{ opacity: 0.7, fontSize: "10px" }}
+                                  >✕</span>
                                 </span>
                               ))}
                             </>
@@ -221,11 +257,22 @@ export default function ScheduleEvents() {
                       </div>
                     )}
                   </div>
-                  <span onClick={() => handleDelete(ev.id)} style={{ cursor: "pointer", color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>✕</span>
+                  <span style={{ display: "flex", gap: "8px", flexShrink: 0, marginTop: "2px" }}>
+                    <button
+                      onClick={() => openEditModal(ev)}
+                      title="Edit"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "12px", padding: 0 }}
+                    >✎</button>
+                    <button
+                      onClick={() => handleDelete(ev.id)}
+                      title="Delete"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "12px", padding: 0 }}
+                    >✕</button>
+                  </span>
                 </div>
               ))
             )}
-            <button className="btn-add-event" onClick={() => setShowModal(true)}>
+            <button className="btn-add-event" onClick={openAddModal}>
               <PlusIcon /> Add Event
             </button>
           </div>
@@ -235,8 +282,10 @@ export default function ScheduleEvents() {
       {showModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
           <div style={{ background: "var(--white)", borderRadius: "12px", padding: "32px", width: "360px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ fontFamily: "var(--font-d)", fontSize: "18px", marginBottom: "20px" }}>Add Event</h3>
-            <form onSubmit={handleAddEvent}>
+            <h3 style={{ fontFamily: "var(--font-d)", fontSize: "18px", marginBottom: "20px" }}>
+              {editingEvent ? "Edit Event" : "Add Event"}
+            </h3>
+            <form onSubmit={handleSubmit}>
 
               <div className="form-group">
                 <label>Event Name</label>
@@ -282,9 +331,9 @@ export default function ScheduleEvents() {
 
               <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
                 <button type="submit" className="btn-submit" disabled={loading}>
-                  {loading ? "Saving..." : "Add Event"}
+                  {loading ? "Saving..." : editingEvent ? "Save Changes" : "Add Event"}
                 </button>
-                <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="button" className="btn-cancel" onClick={() => { setShowModal(false); setEditingEvent(null); }}>Cancel</button>
               </div>
             </form>
           </div>
