@@ -25,7 +25,7 @@ export default function ForgotPassword() {
       <Button>Send Reset Link</Button>
 
       <div className="auth-link">
-        Remembered your password? <Link to="/login">Back to Login</Link>
+        Remembered your password? <Link to="/login">Back to Login...</Link>
       </div>
     </AuthLayout>
   );
