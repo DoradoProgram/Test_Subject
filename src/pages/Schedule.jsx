@@ -3,6 +3,7 @@ import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const TIMES = [
@@ -42,7 +43,12 @@ export default function Schedule() {
   const [form, setForm] = useState({ name: "", room: "", day: "MON", startTime: "8:00 AM", endTime: "9:00 AM" });
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { fetchClasses(); }, []);
+  useEffect(() => {
+  const unsubscribe = onAuthStateChanged(auth, (user) => {
+    if (user) fetchClasses();
+  });
+  return () => unsubscribe();
+  }, []);
 
   async function fetchClasses() {
     const user = auth.currentUser;
@@ -246,7 +252,12 @@ export default function Schedule() {
               <div className="form-group">
                 <label>Start Time</label>
                 <div className="input-wrap">
-                  <select value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })}
+                  <select value={form.startTime}onChange={e => {
+                                                const start = e.target.value;
+                                                const startIdx = TIMES.indexOf(start);
+                                                const endIdx = Math.min(startIdx + 2, TIMES.length - 1);
+                                                setForm({ ...form, startTime: start, endTime: TIMES[endIdx] });
+                                              }}
                     style={{ width: "100%", height: "42px", border: "1.5px solid var(--border)", borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px", background: "var(--white)", color: "var(--text)" }}>
                     {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>

@@ -2,10 +2,19 @@ import { useState, useEffect } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
 import { auth, db } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, Timestamp } from "firebase/firestore";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+const TIMES = [
+  "6:00 AM","6:30 AM","7:00 AM","7:30 AM","8:00 AM","8:30 AM",
+  "9:00 AM","9:30 AM","10:00 AM","10:30 AM","11:00 AM","11:30 AM",
+  "12:00 PM","12:30 PM","1:00 PM","1:30 PM","2:00 PM","2:30 PM",
+  "3:00 PM","3:30 PM","4:00 PM","4:30 PM","5:00 PM","5:30 PM",
+  "6:00 PM","6:30 PM","7:00 PM","7:30 PM","8:00 PM",
+];
 
 const PlusIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -26,14 +35,29 @@ const ChevronRight = () => (
   </svg>
 );
 
+const selectStyle = {
+  width: "100%", height: "42px", border: "1.5px solid var(--border)",
+  borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px",
+  background: "var(--white)", color: "var(--text)",
+};
+
+function formatDate(dateStr) {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
 export default function ScheduleEvents() {
   const [current, setCurrent] = useState(new Date());
   const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: "", date: "" });
+  const [form, setForm] = useState({ name: "", date: "", endDate: "", startTime: "8:00 AM", endTime: "9:00 AM" });
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { fetchEvents(); }, []);
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) fetchEvents();
+    });
+    return () => unsubscribe();
+  }, []);
 
   async function fetchEvents() {
     const user = auth.currentUser;
@@ -52,10 +76,13 @@ export default function ScheduleEvents() {
       await addDoc(collection(db, "events"), {
         name: form.name,
         date: form.date,
+        endDate: form.endDate || form.date,
+        startTime: form.startTime,
+        endTime: form.endTime,
         uid: user.uid,
         createdAt: Timestamp.now(),
       });
-      setForm({ name: "", date: "" });
+      setForm({ name: "", date: "", endDate: "", startTime: "8:00 AM", endTime: "9:00 AM" });
       setShowModal(false);
       fetchEvents();
     } catch (err) {
@@ -68,6 +95,12 @@ export default function ScheduleEvents() {
   async function handleDelete(id) {
     await deleteDoc(doc(db, "events", id));
     fetchEvents();
+  }
+
+  function handleStartTime(val) {
+    const idx = TIMES.indexOf(val);
+    const endIdx = Math.min(idx + 2, TIMES.length - 1);
+    setForm({ ...form, startTime: val, endTime: TIMES[endIdx] });
   }
 
   function prevMonth() { setCurrent(new Date(current.getFullYear(), current.getMonth() - 1, 1)); }
@@ -95,7 +128,11 @@ export default function ScheduleEvents() {
     const year = current.getFullYear();
     const month = String(current.getMonth() + 1).padStart(2, "0");
     const d = String(day).padStart(2, "0");
-    return events.filter(e => e.date === `${year}-${month}-${d}`);
+    const dateStr = `${year}-${month}-${d}`;
+    return events.filter(e => {
+      const end = e.endDate || e.date;
+      return dateStr >= e.date && dateStr <= end;
+    });
   }
 
   function isToday(day) {
@@ -104,7 +141,7 @@ export default function ScheduleEvents() {
   }
 
   const upcoming = [...events]
-    .filter(e => e.date >= new Date().toISOString().slice(0, 10))
+    .filter(e => (e.endDate || e.date) >= new Date().toISOString().slice(0, 10))
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 8);
 
@@ -145,7 +182,7 @@ export default function ScheduleEvents() {
                                 <span
                                   key={ev.id}
                                   className="event-pill"
-                                  title={ev.name}
+                                  title={`${ev.name}${ev.startTime ? ` · ${ev.startTime}–${ev.endTime}` : ""}`}
                                   onClick={() => handleDelete(ev.id)}
                                   style={{ cursor: "pointer", whiteSpace: "normal", overflow: "visible", textOverflow: "unset" }}
                                 >
@@ -172,7 +209,17 @@ export default function ScheduleEvents() {
                 <div key={ev.id} className="event-entry" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>
                     <div className="ename">{ev.name}</div>
-                    <div className="edate">{new Date(ev.date + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>
+                    <div className="edate">
+                      {formatDate(ev.date)}
+                      {ev.endDate && ev.endDate !== ev.date && (
+                        <> – {formatDate(ev.endDate)}</>
+                      )}
+                    </div>
+                    {ev.startTime && (
+                      <div style={{ fontSize: "11px", color: "var(--muted)", marginTop: "2px" }}>
+                        {ev.startTime} – {ev.endTime}
+                      </div>
+                    )}
                   </div>
                   <span onClick={() => handleDelete(ev.id)} style={{ cursor: "pointer", color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>✕</span>
                 </div>
@@ -187,9 +234,10 @@ export default function ScheduleEvents() {
 
       {showModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-          <div style={{ background: "white", borderRadius: "12px", padding: "32px", width: "360px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)" }}>
+          <div style={{ background: "var(--white)", borderRadius: "12px", padding: "32px", width: "360px", boxShadow: "0 8px 32px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}>
             <h3 style={{ fontFamily: "var(--font-d)", fontSize: "18px", marginBottom: "20px" }}>Add Event</h3>
             <form onSubmit={handleAddEvent}>
+
               <div className="form-group">
                 <label>Event Name</label>
                 <div className="input-wrap">
@@ -197,13 +245,41 @@ export default function ScheduleEvents() {
                     value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
                 </div>
               </div>
+
               <div className="form-group">
-                <label>Date</label>
+                <label>Start Date</label>
                 <div className="input-wrap">
                   <input type="date" value={form.date}
-                    onChange={e => setForm({ ...form, date: e.target.value })} required />
+                    onChange={e => setForm({ ...form, date: e.target.value, endDate: e.target.value })} required />
                 </div>
               </div>
+
+              <div className="form-group">
+                <label>End Date <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional)</span></label>
+                <div className="input-wrap">
+                  <input type="date" value={form.endDate} min={form.date}
+                    onChange={e => setForm({ ...form, endDate: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Start Time</label>
+                <div className="input-wrap">
+                  <select style={selectStyle} value={form.startTime} onChange={e => handleStartTime(e.target.value)}>
+                    {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>End Time</label>
+                <div className="input-wrap">
+                  <select style={selectStyle} value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })}>
+                    {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+
               <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
                 <button type="submit" className="btn-submit" disabled={loading}>
                   {loading ? "Saving..." : "Add Event"}

@@ -312,6 +312,8 @@
   color: var(--muted);
 }
 
+
+
 /* ─── EVENT CALENDAR ─── */
 .cal-wrapper { display: grid; grid-template-columns: 1fr 220px; gap: 20px; }
 .cal-box { background: var(--white); border: 1.5px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
@@ -417,8 +419,11 @@
   align-self: flex-end;
   background: linear-gradient(135deg, var(--primary), var(--nav));
   border-radius: 12px 12px 0 12px;
-  padding: 12px 16px; max-width: 70%;
-  font-family: var(--font-b); font-size: 13.5px; color: var(--white);
+  padding: 12px 16px;
+  max-width: 70%;
+  font-family: var(--font-b);
+  font-size: 13.5px;
+  color: #ffffff;
 }
 .msg-composer {
   display: flex; align-items: center; gap: 10px;
@@ -644,3 +649,31 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 .logout-btn:hover { border-color: var(--error); color: var(--error); background: rgba(220,38,38,0.06); }
+/* Campus Connect text only */
+[data-theme="dark"] .sidebar-logo span {
+    color: #ffffff !important;
+}
+/* Only text inside colored buttons */
+[data-theme="dark"] .btn-primary,
+[data-theme="dark"] .btn-success,
+[data-theme="dark"] .btn-danger,
+[data-theme="dark"] .btn-warning,
+[data-theme="dark"] .btn-info {
+    color: #ffffff !important;
+}
+/* Dark mode - active sidebar tab */
+[data-theme="dark"] .nav-item.active {
+    color: #ffffff !important;
+}
+
+/* Keep the icon white too */
+[data-theme="dark"] .nav-item.active svg {
+    color: #ffffff !important;
+}
+[data-theme="dark"] .nav-item:hover {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .nav-item:hover svg {
+    color: #ffffff !important;
+}
