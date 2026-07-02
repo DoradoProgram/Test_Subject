@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --canvas: #F8F7F7;
+  --primary: #E6194C;
+  --nav: #810E2B;
+  --text: #292325;
+  --muted: #8A757A;
+  --border: #E8E3E4;
+  --accent1: #36E2B7;
+  --accent2: #E26136;
+  --accent3: #3236B7;
+  --success: #16A34A;
+  --warning: #F59E0B;
+  --error: #DC2626;
+  --info: #0EA5E9;
+  --white: #FFFFFF;
+  --nav-hover: rgba(255,255,255,0.12);
+  --nav-active: rgba(255,255,255,0.18);
+  --shadow: 0 2px 12px rgba(41,35,37,0.08);
+  --shadow-md: 0 4px 20px rgba(41,35,37,0.12);
+  --r: 8px;
+  --r-lg: 12px;
+  --font-d: 'Poppins', sans-serif;
+  --font-b: 'Inter', sans-serif;
+}
+
+[data-theme="dark"] {
+  --canvas: #1A1718;
+  --text: #F0EBEC;
+  --muted: #B8A8AD;
+  --border: #3A3436;
+  --white: #242022;
+  --shadow: 0 2px 12px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 20px rgba(0,0,0,0.45);
+}
+
+html, body {
+  min-height: 100vh;
+  background: var(--canvas);
+  font-family: var(--font-b);
+  color: var(--text);
+}

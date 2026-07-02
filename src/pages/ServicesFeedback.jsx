@@ -1,0 +1,139 @@
+import { useState } from "react";
+import AppLayout from "../layouts/AppLayout";
+import { Link } from "react-router-dom";
+
+export default function ServicesFeedback() {
+  const [category, setCategory] = useState("");
+  const [rating, setRating] = useState(0);
+  const [liked, setLiked] = useState("");
+  const [improve, setImprove] = useState("");
+  const [anonymous, setAnonymous] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const validate = () => {
+    const newErrors = {};
+    if (!category) newErrors.category = "Please select a category.";
+    if (rating === 0) newErrors.rating = "Please give a rating.";
+    if (!liked.trim() && !improve.trim())
+      newErrors.feedback = "Please share at least one comment.";
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = () => {
+    if (validate()) setSubmitted(true);
+  };
+
+  const resetForm = () => {
+    setCategory("");
+    setRating(0);
+    setLiked("");
+    setImprove("");
+    setAnonymous(false);
+    setErrors({});
+  };
+
+  const handleOk = () => {
+    setSubmitted(false);
+    resetForm();
+  };
+
+  return (
+    <AppLayout>
+      <div className="tab-bar">
+        <Link to="/services" className="tab">Request Forms</Link>
+        <Link to="/services-inquiry" className="tab">Inquiry</Link>
+        <Link to="/services-feedback" className="tab active">Feedback</Link>
+      </div>
+
+      <div className="tab-content">
+        <div className="services-content">
+          {submitted ? (
+            <div className="success-box">
+              <div className="check-ico">
+                <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <h3>Feedback Submitted!</h3>
+              <p>Thank you for your feedback. It helps us improve Campus Connect.</p>
+              <button className="btn-ok" onClick={handleOk}>OK</button>
+            </div>
+          ) : (
+            <>
+              <h2>Submit Feedback</h2>
+              <p className="sub-desc">Help us improve by sharing your experience.</p>
+
+              <div className="svc-form">
+                <div className="form-row">
+                  <label>Feedback Category</label>
+                  <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                    <option value="">Select Category</option>
+                    <option>Academic Services</option>
+                    <option>Campus Facilities</option>
+                    <option>System / App</option>
+                    <option>Administrative</option>
+                  </select>
+                  {errors.category && <small className="error-text">{errors.category}</small>}
+                </div>
+
+                <div className="form-row">
+                  <label>Overall Rating</label>
+                  <div className="rating-row">
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        className={`rating-btn ${num <= rating ? "filled" : ""}`}
+                        onClick={() => setRating(num)}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                    <span className="rating-val">{rating > 0 ? `${rating}/5` : "—"}</span>
+                  </div>
+                  {errors.rating && <small className="error-text">{errors.rating}</small>}
+                </div>
+
+                <div className="form-row">
+                  <label>What did you like?</label>
+                  <textarea
+                    placeholder="Share what worked well..."
+                    value={liked}
+                    onChange={(e) => setLiked(e.target.value)}
+                  ></textarea>
+                </div>
+
+                <div className="form-row">
+                  <label>What can be improved?</label>
+                  <textarea
+                    placeholder="Share suggestions for improvement..."
+                    value={improve}
+                    onChange={(e) => setImprove(e.target.value)}
+                  ></textarea>
+                  {errors.feedback && <small className="error-text">{errors.feedback}</small>}
+                </div>
+
+                <div className="form-row">
+                  <label>Submit anonymously?</label>
+                  <div className="toggle-row" onClick={() => setAnonymous(!anonymous)}>
+                    <div className={`toggle-track ${anonymous ? "active" : ""}`}></div>
+                    <span className="toggle-label">
+                      {anonymous ? "Yes – submitting anonymously" : "No – submit with my name"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="btn-row">
+                  <button type="button" className="btn-submit" onClick={handleSubmit}>Send Feedback</button>
+                  <button type="button" className="btn-cancel" onClick={resetForm}>Cancel</button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </AppLayout>
+  );
+}
