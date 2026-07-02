@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, query, where, orderBy, limit, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import AppLayout from "../layouts/AppLayout";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 function timeAgo(timestamp) {
   if (!timestamp?.toDate) return "";
@@ -35,10 +35,12 @@ const UserIcon = () => (
 );
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [userData, setUserData] = useState(null);
   const [todayClasses, setTodayClasses] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -73,8 +75,7 @@ export default function Dashboard() {
       try {
         const annQuery = query(
           collection(db, "announcements"),
-          orderBy("createdAt", "desc"),
-          limit(3)
+          orderBy("createdAt", "desc")
         );
         const annSnap = await getDocs(annQuery);
         setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -83,6 +84,19 @@ export default function Dashboard() {
         setAnnouncements([]);
       } finally {
         setAnnLoading(false);
+      }
+
+      try {
+        const threadsQuery = query(
+          collection(db, "messageThreads"),
+          where("uid", "==", user.uid)
+        );
+        const threadsSnap = await getDocs(threadsQuery);
+        const total = threadsSnap.docs.reduce((sum, d) => sum + (d.data().unreadCount || 0), 0);
+        setUnreadCount(total);
+      } catch (err) {
+        console.error("Failed to fetch unread messages:", err);
+        setUnreadCount(0);
       }
     });
 
@@ -100,11 +114,11 @@ export default function Dashboard() {
           <p>{today} · BSIT 2-1</p>
         </div>
         <div className="top-header-right">
-          <button className="notif-btn">
+          <button className="notif-btn" onClick={() => navigate("/messaging")}>
             <BellIcon />
-            <span className="notif-badge">3</span>
+            {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
           </button>
-          <button className="avatar-btn" style={{ overflow: "hidden", padding: 0 }}>
+          <button className="avatar-btn" style={{ overflow: "hidden", padding: 0 }} onClick={() => navigate("/profile")}>
             {userData?.avatarUrl
               ? <img src={userData.avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
               : <UserIcon />
@@ -115,7 +129,7 @@ export default function Dashboard() {
 
       <div className="page-body">
         <div className="stat-cards">
-          <div className="stat-card">
+          <Link to="/schedule" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Today's Classes</div>
             <div className="value">{todayClasses.length}</div>
             <div className="sub">
@@ -123,17 +137,17 @@ export default function Dashboard() {
                 ? `Next: ${todayClasses[0].name} – ${todayClasses[0].time}`
                 : "No classes today"}
             </div>
-          </div>
-          <div className="stat-card">
+          </Link>
+          <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Unread Messages</div>
-            <div className="value">7</div>
-            <div className="sub">Prof. Smith + 2 others</div>
-          </div>
-          <div className="stat-card">
-            <div className="label">Pending Tasks</div>
-            <div className="value">2</div>
-            <div className="sub">1 form · 1 request</div>
-          </div>
+            <div className="value">{unreadCount}</div>
+            <div className="sub">{unreadCount > 0 ? "Tap to view inbox" : "You're all caught up"}</div>
+          </Link>
+          <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
+            <div className="label">Announcements</div>
+            <div className="value">{announcements.length}</div>
+            <div className="sub">Campus-wide updates</div>
+          </Link>
         </div>
 
         <div className="dash-grid">
@@ -147,7 +161,7 @@ export default function Dashboard() {
             ) : announcements.length === 0 ? (
               <p style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "13px" }}>No announcements yet.</p>
             ) : (
-              announcements.map(a => (
+              announcements.slice(0, 3).map(a => (
                 <div className="ann-item" key={a.id}>
                   <h4>{a.title}</h4>
                   <div className="ann-meta">{a.office} · {timeAgo(a.createdAt)}</div>
