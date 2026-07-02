@@ -10,7 +10,7 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 
 function generateTimeOptions() {
   const options = [];
-  for (let hour = 6; hour <= 20; hour++) {   // 20 = 8:00 PM ceiling
+  for (let hour = 7; hour <= 21; hour++) {   // 21 = 9:00 PM ceiling
     const period = hour < 12 ? "AM" : "PM";
     const displayHour = hour <= 12 ? hour : hour - 12;
     options.push(`${displayHour}:00 ${period}`);
@@ -214,14 +214,14 @@ export default function ScheduleEvents() {
                                   onClick={() => openEditModal(ev)}
                                   style={{
                                     cursor: "pointer", whiteSpace: "normal", overflow: "visible", textOverflow: "unset",
-                                    display: "inline-flex", alignItems: "center", gap: "5px",
+                                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px",
                                   }}
                                 >
-                                  {ev.name}
+                                  <span>{ev.name}</span>
                                   <span
                                     onClick={e => { e.stopPropagation(); handleDelete(ev.id); }}
                                     title="Delete"
-                                    style={{ opacity: 0.7, fontSize: "10px" }}
+                                    style={{ opacity: 0.7, fontSize: "10px", flexShrink: 0 }}
                                   >✕</span>
                                 </span>
                               ))}
