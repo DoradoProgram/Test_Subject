@@ -1,4 +1,8 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { auth, db } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 
 const NAV_ITEMS = [
   {
@@ -26,6 +30,7 @@ const NAV_ITEMS = [
   {
     to: "/messaging",
     label: "Messaging",
+    badge: true, // Marker enabling badge rendering layout logic on this menu option
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
@@ -68,8 +73,42 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const { pathname } = useLocation();
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // treat /profile-password as /profile, /schedule-events as /schedule, etc.
+  // Sync Global Sidebar Badge Counter with real-time conversations schema
+  useEffect(() => {
+    let unsubscribeUnread = () => {};
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setUnreadCount(0);
+        return;
+      }
+
+      const conversationsQuery = query(
+        collection(db, "conversations"),
+        where("participants", "array-contains", user.uid)
+      );
+
+      unsubscribeUnread = onSnapshot(conversationsQuery, (snapshot) => {
+        const totalUnread = snapshot.docs.filter(docSnap => {
+          const data = docSnap.data();
+          return data.unread?.[user.uid] === true;
+        }).length;
+        
+        setUnreadCount(totalUnread);
+      }, (err) => {
+        console.error("Sidebar live notification sync failed:", err);
+      });
+    });
+
+    return () => {
+      unsubscribeAuth();
+      unsubscribeUnread();
+    };
+  }, []);
+
+  // Treat sub-routes safely as active pointers
   const active = (to) => {
     if (to === "/profile") return pathname.startsWith("/profile");
     if (to === "/schedule") return pathname.startsWith("/schedule");
@@ -84,10 +123,34 @@ export default function Sidebar() {
         <span>Campus<br />Connect</span>
       </div>
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map(({ to, label, icon }) => (
+        {NAV_ITEMS.map(({ to, label, icon, badge }) => (
           <Link key={to} to={to} className={`nav-item ${active(to) ? "active" : ""}`}>
-            {icon}
-            {label}
+            <div className="nav-icon-wrapper" style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              {icon}
+              {badge && unreadCount > 0 && (
+                <span className="sidebar-badge-dot" style={{
+                  position: "absolute",
+                  top: "-2px",
+                  right: "-2px",
+                  width: "8px",
+                  height: "8px",
+                  backgroundColor: "var(--notification-red, #ff4d4d)",
+                  borderRadius: "50%"
+                }} />
+              )}
+            </div>
+            <span style={{ marginLeft: "8px" }}>{label}</span>
+            {badge && unreadCount > 0 && (
+              <span className="sidebar-badge-count" style={{
+                marginLeft: "auto",
+                fontSize: "11px",
+                fontWeight: "bold",
+                background: "var(--notification-red, #ff4d4d)",
+                color: "white",
+                padding: "2px 6px",
+                borderRadius: "10px"
+              }}>{unreadCount}</span>
+            )}
           </Link>
         ))}
       </nav>

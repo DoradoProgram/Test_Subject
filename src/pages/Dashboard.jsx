@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, query, where, orderBy, getDocs } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, orderBy, getDocs, onSnapshot } from "firebase/firestore";
 import AppLayout from "../layouts/AppLayout";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -36,74 +36,98 @@ const UserIcon = () => (
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [todayClasses, setTodayClasses] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // 1. Auth state tracker
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) return;
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        setCurrentUser(null);
+      }
+    });
+    return () => unsubscribeAuth();
+  }, []);
 
-      const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) setUserData(docSnap.data());
+  // 2. Main data loader and live conversation notifier hook
+  useEffect(() => {
+    if (!currentUser) return;
 
-      const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-      const today = days[new Date().getDay()];
-      const q = query(
-        collection(db, "classes"),
-        where("uid", "==", user.uid),
-        where("day", "==", today)
-      );
-      const snap = await getDocs(q);
-      const sorted = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const toMinutes = t => {
-            const [time, period] = t.split(" ");
-            let [h, m] = time.split(":").map(Number);
-            if (period === "PM" && h !== 12) h += 12;
-            if (period === "AM" && h === 12) h = 0;
-            return h * 60 + m;
-          };
-          return toMinutes(a.time) - toMinutes(b.time);
-        });
-      setTodayClasses(sorted);
+    let unsubscribeUnread = () => {};
 
+    const loadDashboardData = async () => {
       try {
-        const annQuery = query(
-          collection(db, "announcements"),
-          orderBy("createdAt", "desc")
+        // Fetch User Profile
+        const docRef = doc(db, "users", currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) setUserData(docSnap.data());
+
+        // Schedule List Gathering
+        const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+        const todayDay = days[new Date().getDay()];
+        const q = query(
+          collection(db, "classes"),
+          where("uid", "==", currentUser.uid),
+          where("day", "==", todayDay)
         );
+        const snap = await getDocs(q);
+        const sorted = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const toMinutes = t => {
+              const [time, period] = t.split(" ");
+              let [h, m] = time.split(":").map(Number);
+              if (period === "PM" && h !== 12) h += 12;
+              if (period === "AM" && h === 12) h = 0;
+              return h * 60 + m;
+            };
+            return toMinutes(a.time) - toMinutes(b.time);
+          });
+        setTodayClasses(sorted);
+
+        // Fetch System Announcements
+        const annQuery = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
         const annSnap = await getDocs(annQuery);
         setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (err) {
-        console.error("Failed to fetch announcements:", err);
-        setAnnouncements([]);
+        console.error("Dashboard profile fetch error:", err);
       } finally {
         setAnnLoading(false);
       }
 
-      try {
-        const threadsQuery = query(
-          collection(db, "messageThreads"),
-          where("uid", "==", user.uid)
-        );
-        const threadsSnap = await getDocs(threadsQuery);
-        const total = threadsSnap.docs.reduce((sum, d) => sum + (d.data().unreadCount || 0), 0);
-        setUnreadCount(total);
-      } catch (err) {
-        console.error("Failed to fetch unread messages:", err);
-        setUnreadCount(0);
-      }
-    });
+      // Live Snapshot updates for notifications (Independent stream tracker)
+      const conversationsQuery = query(
+        collection(db, "conversations"),
+        where("participants", "array-contains", currentUser.uid)
+      );
 
-    return () => unsubscribe();
-  }, []);
+      unsubscribeUnread = onSnapshot(conversationsQuery, (snapshot) => {
+        const totalUnread = snapshot.docs.filter(docSnap => {
+          const data = docSnap.data();
+          return data.unread && data.unread[currentUser.uid] === true;
+        }).length;
+        
+        console.log("Dashboard sync check -> total unread count is:", totalUnread);
+        setUnreadCount(totalUnread);
+      }, (err) => {
+        console.error("Dashboard background sync crashed:", err);
+      });
+    };
 
-  const displayName = userData?.fullName || auth.currentUser?.displayName || "Student";
+    loadDashboardData();
+
+    return () => {
+      unsubscribeUnread();
+    };
+  }, [currentUser]);
+
+  const displayName = userData?.fullName || currentUser?.displayName || "Student";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   return (
@@ -113,11 +137,51 @@ export default function Dashboard() {
           <h2>Welcome back, {displayName}!</h2>
           <p>{today} · BSIT 2-1</p>
         </div>
-        <div className="top-header-right">
-          <button className="notif-btn" onClick={() => navigate("/messaging")}>
+        <div className="top-header-right" style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+          
+          {/* Main Bell Notification Container */}
+          <button 
+            className="notif-btn" 
+            onClick={() => navigate("/messaging")}
+            style={{ 
+              position: "relative", 
+              background: "none", 
+              border: "none", 
+              cursor: "pointer", 
+              padding: "8px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "inherit"
+            }}
+          >
             <BellIcon />
-            {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
+            {unreadCount > 0 && (
+              <span 
+                className="notif-badge"
+                style={{
+                  position: "absolute",
+                  top: "2px",
+                  right: "2px",
+                  background: "#ff4d4d",
+                  color: "white",
+                  fontSize: "10px",
+                  fontWeight: "bold",
+                  borderRadius: "50%",
+                  width: "16px",
+                  height: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  zIndex: 10
+                }}
+              >
+                {unreadCount}
+              </span>
+            )}
           </button>
+
           <button className="avatar-btn" style={{ overflow: "hidden", padding: 0 }} onClick={() => navigate("/profile")}>
             {userData?.avatarUrl
               ? <img src={userData.avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
@@ -133,9 +197,7 @@ export default function Dashboard() {
             <div className="label">Today's Classes</div>
             <div className="value">{todayClasses.length}</div>
             <div className="sub">
-              {todayClasses.length > 0
-                ? `Next: ${todayClasses[0].name} – ${todayClasses[0].time}`
-                : "No classes today"}
+              {todayClasses.length > 0 ? `Next: ${todayClasses[0].name} – ${todayClasses[0].time}` : "No classes today"}
             </div>
           </Link>
           <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
