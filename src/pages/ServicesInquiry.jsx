@@ -1,9 +1,29 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
 import { auth, db, storage } from "../firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { onAuthStateChanged } from "firebase/auth";
+
+function toDateSafe(ts) {
+  if (!ts) return null;
+  if (typeof ts.toDate === "function") return ts.toDate();
+  if (ts instanceof Date) return ts;
+  return null;
+}
+
+function formatDate(ts) {
+  const date = toDateSafe(ts);
+  return date ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+}
+
+const statusColors = {
+  pending: "var(--warning)",
+  approved: "var(--success)",
+  rejected: "var(--error)",
+  resolved: "var(--success)",
+};
 
 export default function ServicesInquiry() {
   const [inquiryType, setInquiryType] = useState("");
@@ -15,6 +35,36 @@ export default function ServicesInquiry() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
+
+  const [submissions, setSubmissions] = useState([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(true);
+
+  useEffect(() => {
+    let unsubscribeSnap = () => {};
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeSnap();
+      if (!user) {
+        setSubmissions([]);
+        setSubmissionsLoading(false);
+        return;
+      }
+      const q = query(collection(db, "serviceInquiries"), where("uid", "==", user.uid));
+      unsubscribeSnap = onSnapshot(
+        q,
+        (snap) => {
+          const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          rows.sort((a, b) => (toDateSafe(b.createdAt)?.getTime() || 0) - (toDateSafe(a.createdAt)?.getTime() || 0));
+          setSubmissions(rows);
+          setSubmissionsLoading(false);
+        },
+        (err) => {
+          console.error("Failed to load inquiries:", err);
+          setSubmissionsLoading(false);
+        }
+      );
+    });
+    return () => { unsubscribeAuth(); unsubscribeSnap(); };
+  }, []);
 
   const validate = () => {
     const newErrors = {};
@@ -205,6 +255,44 @@ export default function ServicesInquiry() {
                 {errors.submit && <small className="error-text">{errors.submit}</small>}
               </div>
             </>
+          )}
+        </div>
+
+        <div className="services-content" style={{ marginTop: "28px" }}>
+          <h2>My Submissions</h2>
+          {submissionsLoading ? (
+            <p style={{ fontSize: "13px", color: "var(--muted)" }}>Loading submissions...</p>
+          ) : submissions.length === 0 ? (
+            <p style={{ fontSize: "13px", color: "var(--muted)" }}>You haven't sent any inquiries yet.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1.5px solid var(--border)" }}>
+                    <th style={{ padding: "10px 8px" }}>Type</th>
+                    <th style={{ padding: "10px 8px" }}>Directed To</th>
+                    <th style={{ padding: "10px 8px" }}>Subject</th>
+                    <th style={{ padding: "10px 8px" }}>Status</th>
+                    <th style={{ padding: "10px 8px" }}>Date Sent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {submissions.map(s => (
+                    <tr key={s.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "10px 8px" }}>{s.inquiryType}</td>
+                      <td style={{ padding: "10px 8px" }}>{s.directedTo}</td>
+                      <td style={{ padding: "10px 8px" }}>{s.subject}</td>
+                      <td style={{ padding: "10px 8px" }}>
+                        <span style={{ color: statusColors[s.status] || "var(--muted)", fontWeight: 600, textTransform: "capitalize" }}>
+                          {s.status || "pending"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 8px", color: "var(--muted)" }}>{formatDate(s.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

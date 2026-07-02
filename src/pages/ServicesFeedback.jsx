@@ -1,8 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
 import { auth, db } from "../firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+
+function toDateSafe(ts) {
+  if (!ts) return null;
+  if (typeof ts.toDate === "function") return ts.toDate();
+  if (ts instanceof Date) return ts;
+  return null;
+}
+
+function formatDate(ts) {
+  const date = toDateSafe(ts);
+  return date ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+}
 
 export default function ServicesFeedback() {
   const [category, setCategory] = useState("");
@@ -13,6 +26,36 @@ export default function ServicesFeedback() {
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const [submissions, setSubmissions] = useState([]);
+  const [submissionsLoading, setSubmissionsLoading] = useState(true);
+
+  useEffect(() => {
+    let unsubscribeSnap = () => {};
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeSnap();
+      if (!user) {
+        setSubmissions([]);
+        setSubmissionsLoading(false);
+        return;
+      }
+      const q = query(collection(db, "serviceFeedback"), where("uid", "==", user.uid));
+      unsubscribeSnap = onSnapshot(
+        q,
+        (snap) => {
+          const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          rows.sort((a, b) => (toDateSafe(b.createdAt)?.getTime() || 0) - (toDateSafe(a.createdAt)?.getTime() || 0));
+          setSubmissions(rows);
+          setSubmissionsLoading(false);
+        },
+        (err) => {
+          console.error("Failed to load feedback:", err);
+          setSubmissionsLoading(false);
+        }
+      );
+    });
+    return () => { unsubscribeAuth(); unsubscribeSnap(); };
+  }, []);
 
   const validate = () => {
     const newErrors = {};
@@ -161,6 +204,38 @@ export default function ServicesFeedback() {
                 {errors.submit && <small className="error-text">{errors.submit}</small>}
               </div>
             </>
+          )}
+        </div>
+
+        <div className="services-content" style={{ marginTop: "28px" }}>
+          <h2>My Submissions</h2>
+          {submissionsLoading ? (
+            <p style={{ fontSize: "13px", color: "var(--muted)" }}>Loading submissions...</p>
+          ) : submissions.length === 0 ? (
+            <p style={{ fontSize: "13px", color: "var(--muted)" }}>You haven't submitted any feedback yet.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1.5px solid var(--border)" }}>
+                    <th style={{ padding: "10px 8px" }}>Category</th>
+                    <th style={{ padding: "10px 8px" }}>Rating</th>
+                    <th style={{ padding: "10px 8px" }}>Anonymous</th>
+                    <th style={{ padding: "10px 8px" }}>Date Submitted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {submissions.map(s => (
+                    <tr key={s.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "10px 8px" }}>{s.category}</td>
+                      <td style={{ padding: "10px 8px" }}>{s.rating ? `${s.rating}/5` : "—"}</td>
+                      <td style={{ padding: "10px 8px" }}>{s.anonymous ? "Yes" : "No"}</td>
+                      <td style={{ padding: "10px 8px", color: "var(--muted)" }}>{formatDate(s.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
