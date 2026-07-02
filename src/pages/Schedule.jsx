@@ -207,6 +207,7 @@ export default function Schedule() {
   }
 
   const skipSet = buildSkipSet();
+  const todayName = DAYS[new Date().getDay()];
 
   return (
     <AppLayout>
@@ -223,11 +224,17 @@ export default function Schedule() {
         </div>
 
         <div className="weekly-grid">
-          <table style={{ tableLayout: "fixed" }}>
+          <table style={{ tableLayout: "fixed", width: "100%" }}>
+            <colgroup>
+              <col style={{ width: "70px" }} />
+              {DAYS.map(d => <col key={d} />)}
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: "70px" }}></th>
-                {DAYS.map(d => <th key={d}>{d}</th>)}
+                <th></th>
+                {DAYS.map(d => (
+                  <th key={d} className={d === todayName ? "today-col" : ""}>{d}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -239,12 +246,13 @@ export default function Schedule() {
                   {DAYS.map(day => {
                     if (skipSet.has(`${day}-${timeIdx}`)) return null;
                     const clsList = getClassAt(day, time);
+                    const isToday = day === todayName;
                     if (clsList.length > 0) {
                       const cls = clsList[0];
                       const span = getRowSpan(cls.startTime || cls.time, cls.endTime || cls.startTime || cls.time);
                       const blockHeight = span * ROW_HEIGHT - 4;
                       return (
-                        <td key={day} rowSpan={span} style={{ verticalAlign: "top", padding: "2px" }}>
+                        <td key={day} rowSpan={span} className={isToday ? "today-col" : ""} style={{ verticalAlign: "top", padding: "2px" }}>
                           <div
                             className="class-block"
                             style={{
@@ -281,7 +289,7 @@ export default function Schedule() {
                         </td>
                       );
                     }
-                    return <td key={day} style={{ padding: 0 }}></td>;
+                    return <td key={day} className={isToday ? "today-col" : ""} style={{ padding: 0 }}></td>;
                   })}
                 </tr>
               ))}

@@ -288,6 +288,13 @@
   text-align: center; min-width: 70px; background: var(--canvas);
   font-weight: 600;
 }
+.weekly-grid th.today-col {
+  background: var(--primary);
+  color: var(--white);
+}
+.weekly-grid td.today-col {
+  background: rgba(230,25,76,0.05);
+}
 .class-block {
   margin: 3px;
   background: rgba(129,14,43,0.08);
