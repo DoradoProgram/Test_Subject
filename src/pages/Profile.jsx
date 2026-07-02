@@ -131,7 +131,8 @@ export default function Profile() {
             </div>
             <div className="form-row">
               <label>Course &amp; Section</label>
-              <input type="text" value={form.course} readOnly style={{ background: "var(--canvas)", color: "var(--muted)" }} />
+              <input type="text" placeholder="e.g. BSIT 2-1" value={form.course}
+                onChange={e => setForm({ ...form, course: e.target.value })} />
             </div>
             <div className="form-row">
               <label>Bio / Description</label>
