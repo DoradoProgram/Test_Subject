@@ -677,3 +677,42 @@
 [data-theme="dark"] .nav-item:hover svg {
     color: #ffffff !important;
 }
+
+/* Dark mode dashboard buttons */
+[data-theme="dark"] .notif-btn,
+[data-theme="dark"] .avatar-btn {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .dash-card-header a {
+    color: #ffffff;
+}
+
+.nav-item.active {
+  background: var(--nav-active);
+  color: var(--white);
+  border-left-color: var(--accent1);
+}
+
+[data-theme="dark"] .dash-card button,
+[data-theme="dark"] .stat-card button {
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] button,
+[data-theme="dark"] input[type="submit"],
+[data-theme="dark"] input[type="button"],
+[data-theme="dark"] .btn,
+[data-theme="dark"] .btn-primary,
+[data-theme="dark"] .btn-secondary,
+[data-theme="dark"] .btn-success,
+[data-theme="dark"] .btn-danger,
+[data-theme="dark"] .btn-warning,
+[data-theme="dark"] .btn-info,
+[data-theme="dark"] .save-btn,
+[data-theme="dark"] .submit-btn,
+[data-theme="dark"] .send-btn,
+[data-theme="dark"] .post-btn,
+[data-theme="dark"] .update-btn {
+    color: #ffffff !important;
+}
