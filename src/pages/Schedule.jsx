@@ -6,12 +6,17 @@ import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where } 
 import { onAuthStateChanged } from "firebase/auth";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-const TIMES = [
-  "7:00 AM","7:30 AM","8:00 AM","8:30 AM","9:00 AM","9:30 AM",
-  "10:00 AM","10:30 AM","11:00 AM","11:30 AM","12:00 PM","12:30 PM",
-  "1:00 PM","1:30 PM","2:00 PM","2:30 PM","3:00 PM","3:30 PM",
-  "4:00 PM","4:30 PM","5:00 PM","5:30 PM","6:00 PM","6:30 PM","7:00 PM",
-];
+
+function generateTimeOptions() {
+  const options = [];
+  for (let hour = 7; hour <= 21; hour++) {   // 21 = 9:00 PM ceiling
+    const period = hour < 12 ? "AM" : "PM";
+    const displayHour = hour <= 12 ? hour : hour - 12;
+    options.push(`${displayHour}:00 ${period}`);
+  }
+  return options;
+}
+const TIMES = generateTimeOptions();
 
 function toMinutes(t) {
   const [time, period] = t.split(" ");
@@ -23,10 +28,10 @@ function toMinutes(t) {
 
 function getRowSpan(startTime, endTime) {
   const diff = toMinutes(endTime) - toMinutes(startTime);
-  return Math.max(1, Math.round(diff / 30));
+  return Math.max(1, Math.round(diff / 60));
 }
 
-const ROW_HEIGHT = 36;
+const ROW_HEIGHT = 56;
 
 const PlusIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -241,7 +246,7 @@ export default function Schedule() {
               {TIMES.map((time, timeIdx) => (
                 <tr key={time} style={{ height: `${ROW_HEIGHT}px` }}>
                   <td className="time-cell" style={{ fontSize: "11px", padding: "0 8px", verticalAlign: "middle", textAlign: "right" }}>
-                    {time.includes(":00") ? time : ""}
+                    {time}
                   </td>
                   {DAYS.map(day => {
                     if (skipSet.has(`${day}-${timeIdx}`)) return null;
