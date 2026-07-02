@@ -35,19 +35,25 @@ const PlusIcon = () => (
   </svg>
 );
 
+const selectStyle = {
+  width: "100%", height: "42px", border: "1.5px solid var(--border)",
+  borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px",
+  background: "var(--white)", color: "var(--text)",
+};
+
 export default function Schedule() {
   const [classes, setClasses] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingClass, setEditingClass] = useState(null);
-  const [selectedClass, setSelectedClass] = useState(null);
   const [form, setForm] = useState({ name: "", room: "", day: "MON", startTime: "8:00 AM", endTime: "9:00 AM" });
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, (user) => {
-    if (user) fetchClasses();
-  });
-  return () => unsubscribe();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) fetchClasses();
+    });
+    return () => unsubscribe();
   }, []);
 
   async function fetchClasses() {
@@ -58,31 +64,103 @@ export default function Schedule() {
     setClasses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
   }
 
+  // ── Overlap handling ──────────────────────────────────────────────
+  // Existing classes on the currently-selected day, as [startIdx, endIdx)
+  // index ranges into TIMES, so start/end options in the form can be
+  // checked against them. The class being edited is excluded so it
+  // doesn't collide with itself.
+  function occupiedRangesFor(day, excludeId) {
+    return classes
+      .filter(c => c.day === day && c.id !== excludeId)
+      .map(c => ({
+        id: c.id,
+        startIdx: TIMES.indexOf(c.startTime || c.time),
+        endIdx: TIMES.indexOf(c.endTime || c.startTime || c.time),
+      }))
+      .filter(r => r.startIdx !== -1 && r.endIdx !== -1)
+      .sort((a, b) => a.startIdx - b.startIdx);
+  }
+
+  const dayOccupied = occupiedRangesFor(form.day, editingClass?.id ?? null);
+
+  function isStartTimeOccupied(idx, occupied = dayOccupied) {
+    return occupied.some(r => idx >= r.startIdx && idx < r.endIdx);
+  }
+
+  function computeEndOptions(startIdx, occupied = dayOccupied) {
+    const nextOccupiedStart = occupied
+      .map(r => r.startIdx)
+      .filter(idx => idx > startIdx)
+      .sort((a, b) => a - b)[0];
+    const maxEndIdx = nextOccupiedStart !== undefined ? nextOccupiedStart : TIMES.length - 1;
+    return TIMES.slice(startIdx + 1, maxEndIdx + 1);
+  }
+
+  const startIndex = TIMES.indexOf(form.startTime);
+  const endOptions = computeEndOptions(startIndex);
+
+  function handleStartTimeChange(e) {
+    const newStart = e.target.value;
+    const newStartIdx = TIMES.indexOf(newStart);
+    const validEnds = computeEndOptions(newStartIdx);
+    setForm(f => ({
+      ...f,
+      startTime: newStart,
+      endTime: validEnds.includes(f.endTime) ? f.endTime : (validEnds[0] || ""),
+    }));
+  }
+
+  function handleDayChange(e) {
+    // Day changed — occupied ranges are different now, so re-derive valid
+    // end options for the currently chosen start time.
+    const newDay = e.target.value;
+    const newOccupied = occupiedRangesFor(newDay, editingClass?.id ?? null);
+    const curStartIdx = TIMES.indexOf(form.startTime);
+    const validEnds = computeEndOptions(curStartIdx, newOccupied);
+    setForm(f => ({
+      ...f,
+      day: newDay,
+      endTime: validEnds.includes(f.endTime) ? f.endTime : (validEnds[0] || ""),
+    }));
+  }
+
   function openAddModal() {
     setEditingClass(null);
+    setError("");
     setForm({ name: "", room: "", day: "MON", startTime: "8:00 AM", endTime: "9:00 AM" });
     setShowModal(true);
   }
 
   function openEditModal(cls) {
     setEditingClass(cls);
+    setError("");
     setForm({
       name: cls.name, room: cls.room, day: cls.day,
       startTime: cls.startTime || cls.time || "8:00 AM",
       endTime: cls.endTime || "9:00 AM",
     });
-    setSelectedClass(null);
     setShowModal(true);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setError("");
     const user = auth.currentUser;
     if (!user) return;
-    if (toMinutes(form.endTime) <= toMinutes(form.startTime)) {
-      alert("End time must be after start time.");
+
+    if (!form.endTime || TIMES.indexOf(form.endTime) <= startIndex) {
+      setError("End time must be after start time.");
       return;
     }
+    if (isStartTimeOccupied(startIndex)) {
+      setError("That start time overlaps with an existing class.");
+      return;
+    }
+    if (TIMES.indexOf(form.endTime) > (endOptions.length ? TIMES.indexOf(endOptions[endOptions.length - 1]) : -1)) {
+      setError("End time overlaps with an existing class.");
+      return;
+    }
+
     setLoading(true);
     try {
       const data = {
@@ -100,6 +178,7 @@ export default function Schedule() {
       fetchClasses();
     } catch (err) {
       console.error(err);
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -108,7 +187,6 @@ export default function Schedule() {
   async function handleDelete(id) {
     if (!window.confirm("Delete this class?")) return;
     await deleteDoc(doc(db, "classes", id));
-    setSelectedClass(null);
     fetchClasses();
   }
 
@@ -132,10 +210,6 @@ export default function Schedule() {
 
   return (
     <AppLayout>
-      {selectedClass && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 10 }} onClick={() => setSelectedClass(null)} />
-      )}
-
       <div className="tab-bar">
         <Link to="/schedule" className="tab active">Class Schedule</Link>
         <Link to="/schedule-events" className="tab">Event Calendar</Link>
@@ -168,44 +242,41 @@ export default function Schedule() {
                     if (clsList.length > 0) {
                       const cls = clsList[0];
                       const span = getRowSpan(cls.startTime || cls.time, cls.endTime || cls.startTime || cls.time);
-                      const isSelected = selectedClass?.id === cls.id;
                       const blockHeight = span * ROW_HEIGHT - 4;
                       return (
-                        <td key={day} rowSpan={span} style={{ verticalAlign: "top", padding: "2px", position: "relative", zIndex: isSelected ? 20 : 1 }}>
+                        <td key={day} rowSpan={span} style={{ verticalAlign: "top", padding: "2px" }}>
                           <div
-                            onClick={e => { e.stopPropagation(); setSelectedClass(isSelected ? null : cls); }}
                             className="class-block"
                             style={{
                               height: `${blockHeight}px`,
                               boxSizing: "border-box",
-                              cursor: "pointer",
                               position: "relative",
                               overflow: "hidden",
-                              border: isSelected ? "2px solid var(--primary)" : undefined,
-                              transition: "border 0.15s",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "flex-start",
+                              gap: "4px",
                             }}
                           >
-                            <div style={{ fontWeight: 600, fontSize: "11px" }}>{cls.name}</div>
-                            {cls.room && <div style={{ fontSize: "10px", opacity: 0.7 }}>{cls.room}</div>}
-                            <div style={{ fontSize: "10px", opacity: 0.6, marginTop: "2px" }}>
-                              {cls.startTime || cls.time} – {cls.endTime}
-                            </div>
-                            {isSelected && (
-                              <div style={{
-                                position: "absolute", bottom: 4, left: 0, right: 0,
-                                display: "flex", justifyContent: "center", gap: "6px",
-                                background: "var(--white)", padding: "4px 0",
-                              }}>
-                                <button
-                                  onClick={e => { e.stopPropagation(); openEditModal(cls); }}
-                                  style={{ fontSize: "10px", fontWeight: 600, color: "white", background: "var(--nav)", border: "none", borderRadius: "4px", padding: "3px 8px", cursor: "pointer" }}
-                                >Edit</button>
-                                <button
-                                  onClick={e => { e.stopPropagation(); handleDelete(cls.id); }}
-                                  style={{ fontSize: "10px", fontWeight: 600, color: "white", background: "#dc2626", border: "none", borderRadius: "4px", padding: "3px 8px", cursor: "pointer" }}
-                                >Delete</button>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, fontSize: "11px" }}>{cls.name}</div>
+                              {cls.room && <div style={{ fontSize: "10px", opacity: 0.7 }}>{cls.room}</div>}
+                              <div style={{ fontSize: "10px", opacity: 0.6, marginTop: "2px" }}>
+                                {cls.startTime || cls.time} – {cls.endTime}
                               </div>
-                            )}
+                            </div>
+                            <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                              <button
+                                onClick={() => openEditModal(cls)}
+                                title="Edit"
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "11px", opacity: 0.75, padding: 0 }}
+                              >✎</button>
+                              <button
+                                onClick={() => handleDelete(cls.id)}
+                                title="Delete"
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontSize: "11px", opacity: 0.75, padding: 0 }}
+                              >✕</button>
+                            </div>
                           </div>
                         </td>
                       );
@@ -243,8 +314,7 @@ export default function Schedule() {
               <div className="form-group">
                 <label>Day</label>
                 <div className="input-wrap">
-                  <select value={form.day} onChange={e => setForm({ ...form, day: e.target.value })}
-                    style={{ width: "100%", height: "42px", border: "1.5px solid var(--border)", borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px", background: "var(--white)", color: "var(--text)" }}>
+                  <select value={form.day} onChange={handleDayChange} style={selectStyle}>
                     {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </div>
@@ -252,14 +322,12 @@ export default function Schedule() {
               <div className="form-group">
                 <label>Start Time</label>
                 <div className="input-wrap">
-                  <select value={form.startTime}onChange={e => {
-                                                const start = e.target.value;
-                                                const startIdx = TIMES.indexOf(start);
-                                                const endIdx = Math.min(startIdx + 2, TIMES.length - 1);
-                                                setForm({ ...form, startTime: start, endTime: TIMES[endIdx] });
-                                              }}
-                    style={{ width: "100%", height: "42px", border: "1.5px solid var(--border)", borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px", background: "var(--white)", color: "var(--text)" }}>
-                    {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                  <select value={form.startTime} onChange={handleStartTimeChange} style={selectStyle}>
+                    {TIMES.map((t, idx) => (
+                      <option key={t} value={t} disabled={isStartTimeOccupied(idx)}>
+                        {t}{isStartTimeOccupied(idx) ? " (occupied)" : ""}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -267,13 +335,17 @@ export default function Schedule() {
                 <label>End Time</label>
                 <div className="input-wrap">
                   <select value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })}
-                    style={{ width: "100%", height: "42px", border: "1.5px solid var(--border)", borderRadius: "var(--r)", padding: "0 14px", fontSize: "14px", background: "var(--white)", color: "var(--text)" }}>
-                    {TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                    style={selectStyle} disabled={endOptions.length === 0}>
+                    {endOptions.length === 0 && <option value="">No valid end time</option>}
+                    {endOptions.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
+
+              {error && <p style={{ color: "var(--error)", fontSize: "13px", marginBottom: "12px" }}>{error}</p>}
+
               <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
-                <button type="submit" className="btn-submit" disabled={loading}>
+                <button type="submit" className="btn-submit" disabled={loading || endOptions.length === 0 || isStartTimeOccupied(startIndex)}>
                   {loading ? "Saving..." : editingClass ? "Save Changes" : "Add Class"}
                 </button>
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>Cancel</button>
