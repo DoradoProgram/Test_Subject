@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, query, where, orderBy, getDocs, onSnapshot } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, orderBy, getDocs } from "firebase/firestore";
 import AppLayout from "../layouts/AppLayout";
 import { Link, useNavigate } from "react-router-dom";
+import { useUnread } from "../context/UnreadContext";
 
 function timeAgo(timestamp) {
   if (!timestamp?.toDate) return "";
@@ -41,7 +42,7 @@ export default function Dashboard() {
   const [todayClasses, setTodayClasses] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { unreadCount } = useUnread();
 
   // 1. Auth state tracker
   useEffect(() => {
@@ -55,11 +56,9 @@ export default function Dashboard() {
     return () => unsubscribeAuth();
   }, []);
 
-  // 2. Main data loader and live conversation notifier hook
+  // 2. Main data loader (profile, today's classes, announcements)
   useEffect(() => {
     if (!currentUser) return;
-
-    let unsubscribeUnread = () => {};
 
     const loadDashboardData = async () => {
       try {
@@ -100,31 +99,9 @@ export default function Dashboard() {
       } finally {
         setAnnLoading(false);
       }
-
-      // Live Snapshot updates for notifications (Independent stream tracker)
-      const conversationsQuery = query(
-        collection(db, "conversations"),
-        where("participants", "array-contains", currentUser.uid)
-      );
-
-      unsubscribeUnread = onSnapshot(conversationsQuery, (snapshot) => {
-        const totalUnread = snapshot.docs.filter(docSnap => {
-          const data = docSnap.data();
-          return data.unread && data.unread[currentUser.uid] === true;
-        }).length;
-        
-        console.log("Dashboard sync check -> total unread count is:", totalUnread);
-        setUnreadCount(totalUnread);
-      }, (err) => {
-        console.error("Dashboard background sync crashed:", err);
-      });
     };
 
     loadDashboardData();
-
-    return () => {
-      unsubscribeUnread();
-    };
   }, [currentUser]);
 
   const displayName = userData?.fullName || currentUser?.displayName || "Student";

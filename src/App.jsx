@@ -1,4 +1,5 @@
 import { ThemeProvider } from "./context/ThemeContext";
+import { UnreadProvider } from "./context/UnreadContext";
 import Router from "./router";
 import "./App.css";
 import "./styles/styles.css";
@@ -6,7 +7,9 @@ import "./styles/styles.css";
 function App() {
   return (
     <ThemeProvider>
-      <Router />
+      <UnreadProvider>
+        <Router />
+      </UnreadProvider>
     </ThemeProvider>
   );
 }

@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { auth, db } from "../firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { useUnread } from "../context/UnreadContext";
 
 const NAV_ITEMS = [
   {
@@ -73,40 +70,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const { pathname } = useLocation();
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  // Sync Global Sidebar Badge Counter with real-time conversations schema
-  useEffect(() => {
-    let unsubscribeUnread = () => {};
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        setUnreadCount(0);
-        return;
-      }
-
-      const conversationsQuery = query(
-        collection(db, "conversations"),
-        where("participants", "array-contains", user.uid)
-      );
-
-      unsubscribeUnread = onSnapshot(conversationsQuery, (snapshot) => {
-        const totalUnread = snapshot.docs.filter(docSnap => {
-          const data = docSnap.data();
-          return data.unread?.[user.uid] === true;
-        }).length;
-        
-        setUnreadCount(totalUnread);
-      }, (err) => {
-        console.error("Sidebar live notification sync failed:", err);
-      });
-    });
-
-    return () => {
-      unsubscribeAuth();
-      unsubscribeUnread();
-    };
-  }, []);
+  const { unreadCount } = useUnread();
 
   // Treat sub-routes safely as active pointers
   const active = (to) => {

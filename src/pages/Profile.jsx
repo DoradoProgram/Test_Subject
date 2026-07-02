@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
-import { auth, db } from "../firebase";
+import { auth, db, storage } from "../firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export default function Profile() {
   const [form, setForm] = useState({ fullName: "", studentId: "", email: "", course: "", bio: "" });
@@ -52,14 +53,13 @@ export default function Profile() {
     try {
       let avatarUrl = preview;
 
-      // Convert image to base64 and store in Firestore if new photo selected
+      // Upload the new photo to Firebase Storage and store just the URL in
+      // Firestore. Keeps documents small and avoids the 1MB Firestore
+      // document-size limit that large base64 images could hit.
       if (avatar) {
-        avatarUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(avatar);
-        });
+        const avatarRef = ref(storage, `avatars/${user.uid}`);
+        await uploadBytes(avatarRef, avatar);
+        avatarUrl = await getDownloadURL(avatarRef);
       }
 
       await updateDoc(doc(db, "users", user.uid), {

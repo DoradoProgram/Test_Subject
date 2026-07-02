@@ -140,7 +140,11 @@ export default function Messaging() {
     return () => unsubscribeMessages();
   }, [activeId, currentUser]);
 
-  // 4. "Starts-With" Range User Search Loop
+  // 4. Case-insensitive "contains" user search
+  // Firestore range queries only support case-sensitive prefix matching, so
+  // instead we pull the users collection and filter client-side. This keeps
+  // matching correct regardless of case or where in the name the query
+  // appears (e.g. "ann" matches "Ann Reyes" or "Marianne Cruz").
   useEffect(() => {
     if (!searchName.trim()) {
       setSearchResults([]);
@@ -148,20 +152,17 @@ export default function Messaging() {
     }
     const delayDebounce = setTimeout(async () => {
       try {
-        const searchStr = searchName.trim();
-        const endStr = searchStr + "\uf8ff"; 
+        const needle = searchName.trim().toLowerCase();
+        const snap = await getDocs(collection(db, "users"));
 
-        const usersQ = query(
-          collection(db, "users"),
-          where("fullName", ">=", searchStr),
-          where("fullName", "<=", endStr)
-        );
-        
-        const snap = await getDocs(usersQ);
         setSearchResults(
           snap.docs
             .map(d => ({ uid: d.id, ...d.data() }))
-            .filter(u => u.uid !== currentUser.uid)
+            .filter(u =>
+              u.uid !== currentUser.uid &&
+              (u.fullName || "").toLowerCase().includes(needle)
+            )
+            .slice(0, 20)
         );
       } catch (e) {
         console.error("User query failed", e);

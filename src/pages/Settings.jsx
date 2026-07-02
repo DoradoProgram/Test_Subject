@@ -5,6 +5,7 @@ import { auth, db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { useTheme } from "../context/ThemeContext";
+import { useUnread } from "../context/UnreadContext";
 
 const BellIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -23,6 +24,7 @@ const UserIcon = () => (
 export default function Settings() {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const { unreadCount } = useUnread();
   const [notifs, setNotifs] = useState({
     announcements: true,
     classUpdates: true,
@@ -105,9 +107,9 @@ export default function Settings() {
           <h2>Settings</h2>
         </div>
         <div className="top-header-right">
-          <button className="notif-btn">
+          <button className="notif-btn" onClick={() => navigate("/messaging")}>
             <BellIcon />
-            <span className="notif-badge">3</span>
+            {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
           </button>
           <button className="avatar-btn" style={{ overflow: "hidden", padding: 0 }}>
             {userData?.avatarUrl
