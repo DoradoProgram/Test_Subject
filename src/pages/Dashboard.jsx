@@ -5,6 +5,7 @@ import { doc, getDoc, collection, query, where, orderBy, getDocs } from "firebas
 import AppLayout from "../layouts/AppLayout";
 import { Link, useNavigate } from "react-router-dom";
 import { useUnread } from "../context/UnreadContext";
+import { useNotifPrefs } from "../context/NotifPrefsContext";
 
 function timeAgo(timestamp) {
   if (!timestamp?.toDate) return "";
@@ -43,6 +44,7 @@ export default function Dashboard() {
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
   const { unreadCount } = useUnread();
+  const { notifPrefs } = useNotifPrefs();
 
   // 1. Auth state tracker
   useEffect(() => {
@@ -67,33 +69,41 @@ export default function Dashboard() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) setUserData(docSnap.data());
 
-        // Schedule List Gathering
-        const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-        const todayDay = days[new Date().getDay()];
-        const q = query(
-          collection(db, "classes"),
-          where("uid", "==", currentUser.uid),
-          where("day", "==", todayDay)
-        );
-        const snap = await getDocs(q);
-        const sorted = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .sort((a, b) => {
-            const toMinutes = t => {
-              const [time, period] = t.split(" ");
-              let [h, m] = time.split(":").map(Number);
-              if (period === "PM" && h !== 12) h += 12;
-              if (period === "AM" && h === 12) h = 0;
-              return h * 60 + m;
-            };
-            return toMinutes(a.time) - toMinutes(b.time);
-          });
-        setTodayClasses(sorted);
+        // Schedule List Gathering (only if the user hasn't turned Class Updates off)
+        if (notifPrefs.classUpdates) {
+          const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+          const todayDay = days[new Date().getDay()];
+          const q = query(
+            collection(db, "classes"),
+            where("uid", "==", currentUser.uid),
+            where("day", "==", todayDay)
+          );
+          const snap = await getDocs(q);
+          const sorted = snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => {
+              const toMinutes = t => {
+                const [time, period] = t.split(" ");
+                let [h, m] = time.split(":").map(Number);
+                if (period === "PM" && h !== 12) h += 12;
+                if (period === "AM" && h === 12) h = 0;
+                return h * 60 + m;
+              };
+              return toMinutes(a.time) - toMinutes(b.time);
+            });
+          setTodayClasses(sorted);
+        } else {
+          setTodayClasses([]);
+        }
 
-        // Fetch System Announcements
-        const annQuery = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
-        const annSnap = await getDocs(annQuery);
-        setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // Fetch System Announcements (only if the user hasn't turned them off)
+        if (notifPrefs.announcements) {
+          const annQuery = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
+          const annSnap = await getDocs(annQuery);
+          setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } else {
+          setAnnouncements([]);
+        }
       } catch (err) {
         console.error("Dashboard profile fetch error:", err);
       } finally {
@@ -102,7 +112,7 @@ export default function Dashboard() {
     };
 
     loadDashboardData();
-  }, [currentUser]);
+  }, [currentUser, notifPrefs.announcements, notifPrefs.classUpdates]);
 
   const displayName = userData?.fullName || currentUser?.displayName || "Student";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
@@ -172,9 +182,13 @@ export default function Dashboard() {
         <div className="stat-cards">
           <Link to="/schedule" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Today's Classes</div>
-            <div className="value">{todayClasses.length}</div>
+            <div className="value">{notifPrefs.classUpdates ? todayClasses.length : "—"}</div>
             <div className="sub">
-              {todayClasses.length > 0 ? `Next: ${todayClasses[0].name} – ${todayClasses[0].time}` : "No classes today"}
+              {!notifPrefs.classUpdates
+                ? "Notifications turned off"
+                : todayClasses.length > 0
+                  ? `Next: ${todayClasses[0].name} – ${todayClasses[0].time}`
+                  : "No classes today"}
             </div>
           </Link>
           <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
@@ -184,8 +198,8 @@ export default function Dashboard() {
           </Link>
           <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Announcements</div>
-            <div className="value">{announcements.length}</div>
-            <div className="sub">Campus-wide updates</div>
+            <div className="value">{notifPrefs.announcements ? announcements.length : "—"}</div>
+            <div className="sub">{notifPrefs.announcements ? "Campus-wide updates" : "Notifications turned off"}</div>
           </Link>
         </div>
 
@@ -197,6 +211,10 @@ export default function Dashboard() {
             </div>
             {annLoading ? (
               <p style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "13px" }}>Loading announcements...</p>
+            ) : !notifPrefs.announcements ? (
+              <p style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "13px" }}>
+                Announcement notifications are turned off. Enable them in Settings to see updates here.
+              </p>
             ) : announcements.length === 0 ? (
               <p style={{ padding: "16px 20px", color: "var(--muted)", fontSize: "13px" }}>No announcements yet.</p>
             ) : (
@@ -216,7 +234,11 @@ export default function Dashboard() {
               <Link to="/schedule">View All</Link>
             </div>
             <div className="schedule-list">
-              {todayClasses.length === 0 ? (
+              {!notifPrefs.classUpdates ? (
+                <p style={{ padding: "4px 0", color: "var(--muted)", fontSize: "13px" }}>
+                  Class update notifications are turned off. Enable them in Settings to see today's classes here.
+                </p>
+              ) : todayClasses.length === 0 ? (
                 <p style={{ padding: "4px 0", color: "var(--muted)", fontSize: "13px" }}>No classes today.</p>
               ) : (
                 todayClasses.map(cls => (

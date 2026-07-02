@@ -1,6 +1,9 @@
 import { useState, useRef } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
+import { auth, db, storage } from "../firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export default function ServicesInquiry() {
   const [inquiryType, setInquiryType] = useState("");
@@ -10,6 +13,7 @@ export default function ServicesInquiry() {
   const [file, setFile] = useState(null);
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
 
   const validate = () => {
@@ -22,8 +26,42 @@ export default function ServicesInquiry() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (validate()) setSubmitted(true);
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    const user = auth.currentUser;
+    if (!user) {
+      setErrors({ submit: "You must be logged in to send an inquiry." });
+      return;
+    }
+    setLoading(true);
+    try {
+      let attachmentUrl = "";
+      let attachmentName = "";
+      if (file) {
+        const fileRef = ref(storage, `inquiry-attachments/${user.uid}/${Date.now()}_${file.name}`);
+        await uploadBytes(fileRef, file);
+        attachmentUrl = await getDownloadURL(fileRef);
+        attachmentName = file.name;
+      }
+
+      await addDoc(collection(db, "serviceInquiries"), {
+        inquiryType,
+        directedTo,
+        subject,
+        message,
+        attachmentUrl,
+        attachmentName,
+        uid: user.uid,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+    } catch (err) {
+      console.error(err);
+      setErrors({ submit: "Something went wrong. Please try again." });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -159,9 +197,12 @@ export default function ServicesInquiry() {
                 </div>
 
                 <div className="btn-row">
-                  <button type="button" className="btn-submit" onClick={handleSubmit}>Send Inquiry</button>
+                  <button type="button" className="btn-submit" onClick={handleSubmit} disabled={loading}>
+                    {loading ? "Sending..." : "Send Inquiry"}
+                  </button>
                   <button type="button" className="btn-cancel" onClick={resetForm}>Cancel</button>
                 </div>
+                {errors.submit && <small className="error-text">{errors.submit}</small>}
               </div>
             </>
           )}

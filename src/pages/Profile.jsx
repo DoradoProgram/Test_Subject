@@ -25,7 +25,7 @@ export default function Profile() {
           fullName: data.fullName || "",
           studentId: data.studentId || "",
           email: user.email || "",
-          course: data.course || "BSIT 2-1",
+          course: data.course || "",
           bio: data.bio || "",
         });
         if (data.avatarUrl) setPreview(data.avatarUrl);

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import { useNotifPrefs } from "../context/NotifPrefsContext";
 import { 
   collection, query, orderBy, limit, getDocs, doc, 
   addDoc, serverTimestamp, onSnapshot, where, updateDoc 
@@ -36,16 +37,15 @@ const UserIcon = () => (
 
 export default function Messaging() {
   const [currentUser, setCurrentUser] = useState(null);
+  const { notifPrefs } = useNotifPrefs();
   const [threads, setThreads] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [filter, setFilter] = useState("All");
-  
+
   // Announcements state
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
-  const [annFilter, setAnnFilter] = useState("All");
   const [expandedAnnId, setExpandedAnnId] = useState(null);
 
   // New Chat states
@@ -57,27 +57,40 @@ export default function Messaging() {
 
   const messagesEndRef = useRef(null);
 
-  // 1. Auth Observer & Announcements Initialization
+  // 1. Auth Observer
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setCurrentUser(null);
-        return;
-      }
-      setCurrentUser(user);
-
-      try {
-        const annQuery = query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(20));
-        const annSnap = await getDocs(annQuery);
-        setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        console.error("Failed to fetch announcements:", err);
-      } finally {
-        setAnnLoading(false);
-      }
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user || null);
     });
     return () => unsubscribeAuth();
   }, []);
+
+  // 1b. Announcements fetch (respects the "Announcements" notification preference)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    if (!notifPrefs.announcements) {
+      setAnnouncements([]);
+      setAnnLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAnnLoading(true);
+    (async () => {
+      try {
+        const annQuery = query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(20));
+        const annSnap = await getDocs(annQuery);
+        if (!cancelled) setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.error("Failed to fetch announcements:", err);
+      } finally {
+        if (!cancelled) setAnnLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [currentUser, notifPrefs.announcements]);
 
   // 2. Live Conversations (Inbox) Listener - Sorting complex index requirement removed
   useEffect(() => {
@@ -261,8 +274,6 @@ export default function Messaging() {
   function handleCancelNewThread() { setShowNewMsg(false); setSelectedUser(null); setSearchName(""); setNewText(""); }
   function toggleReadMore(id) { setExpandedAnnId(prev => prev === id ? null : id); }
 
-  const filteredThreads = filter === "All" ? threads : threads.filter(t => t.category === filter);
-  const filteredAnnouncements = annFilter === "All" ? announcements : announcements.filter(a => a.category === annFilter);
   const activeThread = threads.find(t => t.id === activeId);
 
   return (
@@ -271,14 +282,9 @@ export default function Messaging() {
         {/* Inbox sidebar */}
         <div className="msg-sidebar">
           <div className="msg-sidebar-header"><h3>Inbox</h3></div>
-          <div className="msg-filter">
-            {["All", "Courses", "Admin"].map(f => (
-              <button key={f} className={`filter-pill ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{f}</button>
-            ))}
-          </div>
           <div className="thread-list">
-            {filteredThreads.length === 0 && <p className="thread-empty">No conversations found.</p>}
-            {filteredThreads.map(t => (
+            {threads.length === 0 && <p className="thread-empty">No conversations found.</p>}
+            {threads.map(t => (
               <div key={t.id} className={`thread-item ${t.id === activeId ? "active" : ""} ${t.unread?.[currentUser?.uid] ? "unread-highlight" : ""}`} onClick={() => setActiveId(t.id)}>
                 <div className="thread-meta-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h4>{t.name}</h4>
@@ -352,17 +358,14 @@ export default function Messaging() {
         {/* Announcements panel */}
         <div className="ann-panel">
           <h3>Announcements</h3>
-          <div className="msg-filter" style={{ padding: "0 0 12px" }}>
-            {["All", "Course", "Events"].map(f => (
-              <button key={f} className={`filter-pill ${annFilter === f ? "active" : ""}`} style={{ fontSize: "10px", padding: "3px 8px" }} onClick={() => setAnnFilter(f)}>{f}</button>
-            ))}
-          </div>
           {annLoading ? (
             <p className="thread-empty">Loading announcements...</p>
-          ) : filteredAnnouncements.length === 0 ? (
+          ) : !notifPrefs.announcements ? (
+            <p className="thread-empty">Announcement notifications are turned off. Enable them in Settings to see updates here.</p>
+          ) : announcements.length === 0 ? (
             <p className="thread-empty">No announcements in this category.</p>
           ) : (
-            filteredAnnouncements.map(a => {
+            announcements.map(a => {
               const isExpanded = expandedAnnId === a.id;
               return (
                 <div className="ann-panel-entry" key={a.id}>

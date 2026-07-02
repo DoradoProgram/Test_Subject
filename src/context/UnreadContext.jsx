@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { useNotifPrefs } from "./NotifPrefsContext";
 
 const UnreadContext = createContext({ unreadCount: 0 });
 
@@ -11,7 +12,8 @@ const UnreadContext = createContext({ unreadCount: 0 });
  * each consumer (Sidebar, Dashboard, Settings, ...) spinning up its own.
  */
 export function UnreadProvider({ children }) {
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [rawUnreadCount, setRawUnreadCount] = useState(0);
+  const { notifPrefs } = useNotifPrefs();
 
   useEffect(() => {
     let unsubscribeUnread = () => {};
@@ -20,7 +22,7 @@ export function UnreadProvider({ children }) {
       unsubscribeUnread();
 
       if (!user) {
-        setUnreadCount(0);
+        setRawUnreadCount(0);
         return;
       }
 
@@ -36,7 +38,7 @@ export function UnreadProvider({ children }) {
             const data = docSnap.data();
             return data.unread?.[user.uid] === true;
           }).length;
-          setUnreadCount(totalUnread);
+          setRawUnreadCount(totalUnread);
         },
         (err) => {
           console.error("Unread conversations sync failed:", err);
@@ -49,6 +51,10 @@ export function UnreadProvider({ children }) {
       unsubscribeUnread();
     };
   }, []);
+
+  // Respect the "Direct Messages" notification preference: when turned
+  // off, the badge is fully suppressed everywhere it's shown.
+  const unreadCount = notifPrefs.directMessages ? rawUnreadCount : 0;
 
   return (
     <UnreadContext.Provider value={{ unreadCount }}>

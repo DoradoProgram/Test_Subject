@@ -1,6 +1,8 @@
 import { useState } from "react";
 import AppLayout from "../layouts/AppLayout";
 import { Link } from "react-router-dom";
+import { auth, db } from "../firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 export default function ServicesFeedback() {
   const [category, setCategory] = useState("");
@@ -10,6 +12,7 @@ export default function ServicesFeedback() {
   const [anonymous, setAnonymous] = useState(false);
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const validate = () => {
     const newErrors = {};
@@ -21,8 +24,31 @@ export default function ServicesFeedback() {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (validate()) setSubmitted(true);
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    const user = auth.currentUser;
+    if (!user) {
+      setErrors({ submit: "You must be logged in to submit feedback." });
+      return;
+    }
+    setLoading(true);
+    try {
+      await addDoc(collection(db, "serviceFeedback"), {
+        category,
+        rating,
+        liked,
+        improve,
+        anonymous,
+        uid: user.uid,
+        createdAt: serverTimestamp(),
+      });
+      setSubmitted(true);
+    } catch (err) {
+      console.error(err);
+      setErrors({ submit: "Something went wrong. Please try again." });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -33,6 +59,7 @@ export default function ServicesFeedback() {
     setAnonymous(false);
     setErrors({});
   };
+  // resetForm already clears errors (including any submit error) via setErrors({})
 
   const handleOk = () => {
     setSubmitted(false);
@@ -126,9 +153,12 @@ export default function ServicesFeedback() {
                 </div>
 
                 <div className="btn-row">
-                  <button type="button" className="btn-submit" onClick={handleSubmit}>Send Feedback</button>
+                  <button type="button" className="btn-submit" onClick={handleSubmit} disabled={loading}>
+                    {loading ? "Sending..." : "Send Feedback"}
+                  </button>
                   <button type="button" className="btn-cancel" onClick={resetForm}>Cancel</button>
                 </div>
+                {errors.submit && <small className="error-text">{errors.submit}</small>}
               </div>
             </>
           )}

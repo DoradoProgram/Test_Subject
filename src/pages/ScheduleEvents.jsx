@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, Timestamp } from "firebase/firestore";
+import { useNotifPrefs } from "../context/NotifPrefsContext";
 
 const DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -50,6 +51,7 @@ function formatDate(dateStr) {
 
 export default function ScheduleEvents() {
   const [current, setCurrent] = useState(new Date());
+  const { notifPrefs } = useNotifPrefs();
   const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -238,7 +240,11 @@ export default function ScheduleEvents() {
 
           <div className="events-sidebar">
             <h3>Upcoming Events</h3>
-            {upcoming.length === 0 ? (
+            {!notifPrefs.upcomingEvents ? (
+              <p style={{ fontSize: "13px", color: "var(--muted)" }}>
+                Upcoming event reminders are turned off. Enable them in Settings to see them here.
+              </p>
+            ) : upcoming.length === 0 ? (
               <p style={{ fontSize: "13px", color: "var(--muted)" }}>No upcoming events.</p>
             ) : (
               upcoming.map(ev => (
