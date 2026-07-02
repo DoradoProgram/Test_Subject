@@ -5,10 +5,13 @@ import { doc, getDoc } from "firebase/firestore";
 const ThemeContext = createContext();
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState(() => {
+  return localStorage.getItem("theme") || "light";
+});
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
   }, [theme]);
 
   useEffect(() => {
@@ -17,8 +20,10 @@ export function ThemeProvider({ children }) {
       if (!user) return;
       const snap = await getDoc(doc(db, "users", user.uid));
       if (snap.exists() && snap.data().theme) {
-        setTheme(snap.data().theme);
-      }
+      const savedTheme = snap.data().theme;
+      setTheme(savedTheme);
+      localStorage.setItem("theme", savedTheme);
+    }
     }
     loadTheme();
   }, []);
