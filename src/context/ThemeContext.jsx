@@ -1,6 +1,8 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useLayoutEffect, } from "react";
 import { auth, db } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+
 
 const ThemeContext = createContext();
 
@@ -9,24 +11,32 @@ export function ThemeProvider({ children }) {
   return localStorage.getItem("theme") || "light";
 });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("theme", theme);
-  }, [theme]);
+}, [theme]);
 
   useEffect(() => {
-    async function loadTheme() {
-      const user = auth.currentUser;
-      if (!user) return;
+  const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    if (!user) return;
+
+    try {
       const snap = await getDoc(doc(db, "users", user.uid));
+
       if (snap.exists() && snap.data().theme) {
-      const savedTheme = snap.data().theme;
-      setTheme(savedTheme);
-      localStorage.setItem("theme", savedTheme);
+        const savedTheme = snap.data().theme;
+
+        setTheme(savedTheme);
+        localStorage.setItem("theme", savedTheme);
+        document.documentElement.setAttribute("data-theme", savedTheme);
+      }
+    } catch (error) {
+      console.error("Failed to load theme:", error);
     }
-    }
-    loadTheme();
-  }, []);
+  });
+
+  return () => unsubscribe();
+}, []);
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
