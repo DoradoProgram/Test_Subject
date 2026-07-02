@@ -111,7 +111,7 @@ export default function Dashboard() {
       <div className="top-header">
         <div className="top-header-left">
           <h2>Welcome back, {displayName}!</h2>
-          <p>{today} · BSIT 2-1</p>
+          <p>{today}{userData?.course ? ` · ${userData.course}` : ""}</p>
         </div>
         <div className="top-header-right">
           <button className="notif-btn" onClick={() => navigate("/messaging")}>
