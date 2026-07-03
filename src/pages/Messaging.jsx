@@ -6,38 +6,9 @@ import { useNotifPrefs } from "../context/NotifPrefsContext";
 import {
   collection, query, orderBy, limit, getDocs, doc,
   addDoc, serverTimestamp, onSnapshot, where, updateDoc,
-  deleteDoc, arrayUnion, setDoc
+  deleteDoc, arrayUnion
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-
-// ─── AI Assistant config ──────────────────────────────────────────────
-// NOTE: this calls the Gemini API directly from the browser using a key
-// in .env. That's fine for a school project demo, but it means the key
-// is visible in the browser's network tab — anyone could copy it out of
-// devtools. For anything beyond a class demo, this call should go
-// through a small backend/Cloud Function that holds the key instead.
-const AI_UID = "ai-assistant-bot";
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const GEMINI_MODEL = "gemini-2.0-flash"; // check aistudio.google.com if this model name changes
-
-async function askGemini(history) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: history.map(m => ({
-          role: m.senderId === AI_UID ? "model" : "user",
-          parts: [{ text: m.text }],
-        })),
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
-}
 
 function timeAgo(timestamp) {
   if (!timestamp?.toDate) return "";
@@ -60,7 +31,6 @@ function displayNameFor(thread, uid) {
 }
 
 function threadDisplayName(thread, currentUid) {
-  if (thread.isAI) return "AI Assistant";
   if (thread.isGroup) {
     if (thread.groupName?.trim()) return thread.groupName.trim();
     const others = thread.participants
@@ -109,12 +79,6 @@ const FileIcon = () => (
     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
   </svg>
 );
-const RobotIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/>
-    <line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>
-  </svg>
-);
 
 export default function Messaging() {
   const [currentUser, setCurrentUser] = useState(null);
@@ -123,7 +87,6 @@ export default function Messaging() {
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [aiThinking, setAiThinking] = useState(false);
 
   const [announcements, setAnnouncements] = useState([]);
   const [annLoading, setAnnLoading] = useState(true);
@@ -190,8 +153,6 @@ export default function Messaging() {
         return { id: docSnap.id, name: threadDisplayName(data, currentUser.uid), ...data };
       });
       fetchedThreads.sort((a, b) => {
-        if (a.isAI) return -1;
-        if (b.isAI) return 1;
         const timeA = a.updatedAt?.toDate() ? a.updatedAt.toDate().getTime() : 0;
         const timeB = b.updatedAt?.toDate() ? b.updatedAt.toDate().getTime() : 0;
         return timeB - timeA;
@@ -262,11 +223,6 @@ export default function Messaging() {
         senderId: currentUser.uid, text: messageText, createdAt: serverTimestamp()
       });
 
-      if (currentThread?.isAI) {
-        await handleAiReply(currentThread, messageText);
-        return;
-      }
-
       const otherParticipants = currentThread.participants.filter(uid => uid !== currentUser.uid);
       const unreadUpdates = {};
       otherParticipants.forEach(uid => { unreadUpdates[`unread.${uid}`] = true; });
@@ -277,43 +233,6 @@ export default function Messaging() {
     } catch (err) {
       console.error("Error dispatching message:", err);
     }
-  }
-
-  async function handleAiReply(thread, latestUserText) {
-    setAiThinking(true);
-    try {
-      const history = [...messages, { senderId: currentUser.uid, text: latestUserText }];
-      const replyText = await askGemini(history);
-      await addDoc(collection(db, "conversations", thread.id, "messages"), {
-        senderId: AI_UID, text: replyText, createdAt: serverTimestamp()
-      });
-      await updateDoc(doc(db, "conversations", thread.id), {
-        preview: replyText.slice(0, 80), updatedAt: serverTimestamp()
-      });
-    } catch (err) {
-      console.error("Gemini call failed:", err);
-      await addDoc(collection(db, "conversations", thread.id, "messages"), {
-        senderId: AI_UID, text: "Sorry, I couldn't reach the AI service. Check that VITE_GEMINI_API_KEY is set correctly.", createdAt: serverTimestamp()
-      });
-    } finally {
-      setAiThinking(false);
-    }
-  }
-
-  // Opens (or creates) the pinned AI Assistant thread
-  async function openAiAssistant() {
-    if (!currentUser) return;
-    const convId = `ai_${currentUser.uid}`;
-    await setDoc(doc(db, "conversations", convId), {
-      participants: [currentUser.uid],
-      participantNames: { [currentUser.uid]: "You" },
-      isAI: true,
-      isGroup: false,
-      preview: "Ask me anything!",
-      updatedAt: serverTimestamp(),
-      unread: { [currentUser.uid]: false }
-    }, { merge: true });
-    setActiveId(convId);
   }
 
   async function handleDeleteMessage(msgId) {
@@ -433,7 +352,7 @@ export default function Messaging() {
 
     try {
       if (!group) {
-        const existing = threads.find(t => !t.isGroup && !t.isAI && t.participants.length === 2 && t.participants.includes(selectedUsers[0].uid));
+        const existing = threads.find(t => !t.isGroup && t.participants.length === 2 && t.participants.includes(selectedUsers[0].uid));
         if (existing) {
           setActiveId(existing.id); setShowNewMsg(false); resetNewMsgForm(); return;
         }
@@ -482,31 +401,22 @@ export default function Messaging() {
         <div className="msg-sidebar">
           <div className="msg-sidebar-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h3>Inbox</h3>
-            <button
-              onClick={openAiAssistant}
-              title="Chat with AI Assistant"
-              style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "11px", display: "flex", alignItems: "center", gap: "4px" }}
-            >
-              <RobotIcon /> AI
-            </button>
           </div>
           <div className="thread-list">
             {threads.length === 0 && <p className="thread-empty">No conversations found.</p>}
             {threads.map(t => (
               <div key={t.id} className={`thread-item ${t.id === activeId ? "active" : ""} ${t.unread?.[currentUser?.uid] ? "unread-highlight" : ""}`} onClick={() => setActiveId(t.id)}>
                 <div className="thread-meta-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h4>{t.isAI ? "🤖 " : t.isGroup ? "👥 " : ""}{t.name}</h4>
+                  <h4>{t.isGroup ? "👥 " : ""}{t.name}</h4>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     {t.unread?.[currentUser?.uid] && <span className="unread-dot" style={{ width: "8px", height: "8px", backgroundColor: "#ff4d4d", borderRadius: "50%" }} />}
-                    {!t.isAI && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteConversation(t.id); }}
-                        title="Delete conversation"
-                        style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", padding: "2px", display: "flex" }}
-                      >
-                        <TrashIcon />
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteConversation(t.id); }}
+                      title="Delete conversation"
+                      style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", padding: "2px", display: "flex" }}
+                    >
+                      <TrashIcon />
+                    </button>
                   </div>
                 </div>
                 <p style={{ fontWeight: t.unread?.[currentUser?.uid] ? "bold" : "normal" }}>{t.preview}</p>
@@ -559,33 +469,29 @@ export default function Messaging() {
           {activeThread ? (
             <>
               <div className="msg-top">
-                <h3>{activeThread.isAI ? <RobotIcon /> : activeThread.isGroup ? <GroupIcon /> : <UserIcon />} {activeThread.name}</h3>
+                <h3>{activeThread.isGroup ? <GroupIcon /> : <UserIcon />} {activeThread.name}</h3>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   {activeThread.isGroup && (
                     <button onClick={() => handleRenameGroup(activeThread)} title="Rename group" style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
                       <EditIcon /> Rename
                     </button>
                   )}
-                  {!activeThread.isAI && (
-                    <button onClick={() => setShowMembers(s => !s)} title="Members & nicknames" style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "12px" }}>
-                      Members
-                    </button>
-                  )}
+                  <button onClick={() => setShowMembers(s => !s)} title="Members & nicknames" style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "12px" }}>
+                    Members
+                  </button>
                   {activeThread.isGroup && (
                     <button onClick={() => setShowAddMember(s => !s)} title="Add member" style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
                       <PlusIcon /> Add
                     </button>
                   )}
-                  {!activeThread.isAI && (
-                    <button onClick={() => handleDeleteConversation(activeThread.id)} title="Delete conversation" style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }}>
-                      <TrashIcon />
-                    </button>
-                  )}
+                  <button onClick={() => handleDeleteConversation(activeThread.id)} title="Delete conversation" style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }}>
+                    <TrashIcon />
+                  </button>
                   <button className="close-x" onClick={handleCloseThread}>✕</button>
                 </div>
               </div>
 
-              {showMembers && !activeThread.isAI && (
+              {showMembers && (
                 <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border, #eee)" }}>
                   {activeThread.participants.map(uid => (
                     <div key={uid} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", fontSize: "13px" }}>
@@ -619,12 +525,12 @@ export default function Messaging() {
               <div className="msg-body">
                 {messages.map((msg) => {
                   const isMine = msg.senderId === currentUser?.uid;
-                  const senderName = displayNameFor(activeThread, msg.senderId) || (msg.senderId === AI_UID ? "AI Assistant" : "");
+                  const senderName = displayNameFor(activeThread, msg.senderId);
                   const isImage = msg.fileType?.startsWith("image/");
 
                   return (
                     <div key={msg.id} className={isMine ? "bubble-out" : "bubble-in"} style={{ position: "relative", paddingRight: isMine ? "24px" : undefined }}>
-                      {(activeThread.isGroup || activeThread.isAI) && !isMine && (
+                      {activeThread.isGroup && !isMine && (
                         <div style={{ fontSize: "11px", fontWeight: 600, opacity: 0.7, marginBottom: "2px" }}>{senderName}</div>
                       )}
 
@@ -650,26 +556,21 @@ export default function Messaging() {
                     </div>
                   );
                 })}
-                {aiThinking && <div className="bubble-in" style={{ opacity: 0.6, fontStyle: "italic" }}>AI Assistant is typing...</div>}
                 <div ref={messagesEndRef} />
               </div>
 
               <div className="msg-composer">
-                {!activeThread.isAI && (
-                  <>
-                    <input type="file" ref={fileInputRef} style={{ display: "none" }} onChange={handleFileSelected} />
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                      title="Send a photo or file"
-                      style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "0 10px", display: "flex", alignItems: "center" }}
-                    >
-                      <PaperclipIcon />
-                    </button>
-                  </>
-                )}
+                <input type="file" ref={fileInputRef} style={{ display: "none" }} onChange={handleFileSelected} />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  title="Send a photo or file"
+                  style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "0 10px", display: "flex", alignItems: "center" }}
+                >
+                  <PaperclipIcon />
+                </button>
                 <input className="msg-input" placeholder={uploading ? "Uploading..." : "Type a message..."} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} disabled={uploading} />
-                <button className="btn-send" onClick={handleSend} disabled={uploading || aiThinking}>Send</button>
+                <button className="btn-send" onClick={handleSend} disabled={uploading}>Send</button>
               </div>
             </>
           ) : (
