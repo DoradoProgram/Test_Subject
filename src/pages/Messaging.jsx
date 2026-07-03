@@ -3,9 +3,9 @@ import AppLayout from "../layouts/AppLayout";
 import { auth, db } from "../firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { useNotifPrefs } from "../context/NotifPrefsContext";
-import { 
-  collection, query, orderBy, limit, getDocs, doc, 
-  addDoc, serverTimestamp, onSnapshot, where, updateDoc 
+import {
+  collection, query, orderBy, limit, getDocs, doc,
+  addDoc, serverTimestamp, onSnapshot, where, updateDoc
 } from "firebase/firestore";
 
 function timeAgo(timestamp) {
@@ -23,6 +23,21 @@ function timeAgo(timestamp) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// Builds a readable thread name. For a 1-on-1 chat it's just the other
+// person's name. For a group, it's the explicit group name if set,
+// otherwise a comma-joined list of everyone else in the chat.
+function threadDisplayName(thread, currentUid) {
+  if (thread.isGroup) {
+    if (thread.groupName?.trim()) return thread.groupName.trim();
+    const others = thread.participants
+      .filter(uid => uid !== currentUid)
+      .map(uid => thread.participantNames?.[uid] || "Unknown");
+    return others.join(", ");
+  }
+  const otherUid = thread.participants.find(uid => uid !== currentUid);
+  return thread.participantNames?.[otherUid] || "Chat Partner";
+}
+
 const PlusIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -32,6 +47,13 @@ const PlusIcon = () => (
 const UserIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+  </svg>
+);
+
+const GroupIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
+    <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
   </svg>
 );
 
@@ -48,14 +70,16 @@ export default function Messaging() {
   const [annLoading, setAnnLoading] = useState(true);
   const [expandedAnnId, setExpandedAnnId] = useState(null);
 
-  // New Chat states
+  // New Chat states — selectedUsers is now an array to support groups
   const [showNewMsg, setShowNewMsg] = useState(false);
   const [searchName, setSearchName] = useState("");
   const [searchResults, setSearchResults] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [groupName, setGroupName] = useState("");
   const [newText, setNewText] = useState("");
 
   const messagesEndRef = useRef(null);
+  const isGroupDraft = selectedUsers.length > 1;
 
   // 1. Auth Observer
   useEffect(() => {
@@ -92,7 +116,7 @@ export default function Messaging() {
     return () => { cancelled = true; };
   }, [currentUser, notifPrefs.announcements]);
 
-  // 2. Live Conversations (Inbox) Listener - Sorting complex index requirement removed
+  // 2. Live Conversations (Inbox) Listener
   useEffect(() => {
     if (!currentUser) return;
 
@@ -104,15 +128,13 @@ export default function Messaging() {
     const unsubscribeThreads = onSnapshot(q, (snapshot) => {
       const fetchedThreads = snapshot.docs.map(docSnap => {
         const data = docSnap.data();
-        const otherParticipantName = data.participantNames?.[Object.keys(data.participantNames).find(uid => uid !== currentUser.uid)] || "Chat Partner";
         return {
           id: docSnap.id,
-          name: otherParticipantName,
+          name: threadDisplayName(data, currentUser.uid),
           ...data
         };
       });
 
-      // Handle inbox sorting cleanly in JavaScript memory to avoid requiring a complex Firestore index
       fetchedThreads.sort((a, b) => {
         const timeA = a.updatedAt?.toDate() ? a.updatedAt.toDate().getTime() : 0;
         const timeB = b.updatedAt?.toDate() ? b.updatedAt.toDate().getTime() : 0;
@@ -144,7 +166,6 @@ export default function Messaging() {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     });
 
-    // Clear unread indicator instantly when opening a thread
     const threadRef = doc(db, "conversations", activeId);
     updateDoc(threadRef, {
       [`unread.${currentUser.uid}`]: false
@@ -154,10 +175,6 @@ export default function Messaging() {
   }, [activeId, currentUser]);
 
   // 4. Case-insensitive "contains" user search
-  // Firestore range queries only support case-sensitive prefix matching, so
-  // instead we pull the users collection and filter client-side. This keeps
-  // matching correct regardless of case or where in the name the query
-  // appears (e.g. "ann" matches "Ann Reyes" or "Marianne Cruz").
   useEffect(() => {
     if (!searchName.trim()) {
       setSearchResults([]);
@@ -173,6 +190,7 @@ export default function Messaging() {
             .map(d => ({ uid: d.id, ...d.data() }))
             .filter(u =>
               u.uid !== currentUser.uid &&
+              !selectedUsers.some(su => su.uid === u.uid) &&
               (u.fullName || "").toLowerCase().includes(needle)
             )
             .slice(0, 20)
@@ -183,9 +201,9 @@ export default function Messaging() {
     }, 400);
 
     return () => clearTimeout(delayDebounce);
-  }, [searchName, currentUser]);
+  }, [searchName, currentUser, selectedUsers]);
 
-  // Send Message Dispatcher
+  // Send Message Dispatcher — now marks unread for every other participant
   async function handleSend() {
     if (!input.trim() || !activeId || !currentUser) return;
 
@@ -194,7 +212,7 @@ export default function Messaging() {
 
     try {
       const currentThread = threads.find(t => t.id === activeId);
-      const recipientUid = currentThread.participants.find(uid => uid !== currentUser.uid);
+      const otherParticipants = currentThread.participants.filter(uid => uid !== currentUser.uid);
 
       await addDoc(collection(db, "conversations", activeId, "messages"), {
         senderId: currentUser.uid,
@@ -202,57 +220,83 @@ export default function Messaging() {
         createdAt: serverTimestamp()
       });
 
+      const unreadUpdates = {};
+      otherParticipants.forEach(uid => { unreadUpdates[`unread.${uid}`] = true; });
+
       await updateDoc(doc(db, "conversations", activeId), {
         preview: messageText,
         updatedAt: serverTimestamp(),
-        [`unread.${recipientUid}`]: true
+        ...unreadUpdates
       });
     } catch (err) {
       console.error("Error dispatching message:", err);
     }
   }
 
-  // Conversation Generator with custom profile fallback logic
+  function toggleSelectedUser(user) {
+    setSelectedUsers(prev =>
+      prev.some(u => u.uid === user.uid)
+        ? prev.filter(u => u.uid !== user.uid)
+        : [...prev, user]
+    );
+    setSearchName("");
+    setSearchResults([]);
+  }
+
+  function removeSelectedUser(uid) {
+    setSelectedUsers(prev => prev.filter(u => u.uid !== uid));
+  }
+
+  // Conversation Generator — supports 1-on-1 (existing behavior) and groups
   async function handleCreateThread() {
-    if (!selectedUser || !newText.trim() || !currentUser) return;
+    if (selectedUsers.length === 0 || !newText.trim() || !currentUser) return;
+
+    const group = selectedUsers.length > 1;
 
     try {
-      // 1. Check if a thread with this person is already listed in memory
-      const existing = threads.find(t => t.participants.includes(selectedUser.uid));
-      if (existing) {
-        setActiveId(existing.id);
-        setShowNewMsg(false);
-        return;
+      // For 1-on-1 chats only: reuse an existing thread with that same person
+      if (!group) {
+        const existing = threads.find(t =>
+          !t.isGroup &&
+          t.participants.length === 2 &&
+          t.participants.includes(selectedUsers[0].uid)
+        );
+        if (existing) {
+          setActiveId(existing.id);
+          setShowNewMsg(false);
+          resetNewMsgForm();
+          return;
+        }
       }
 
-      // 2. Fetch sender profile details safely
+      // Fetch sender's own display name
       let myName = "Student";
       try {
         const myDoc = await getDocs(query(collection(db, "users"), where("__name__", "==", currentUser.uid)));
         if (!myDoc.empty) {
           myName = myDoc.docs[0].data().fullName || "Student";
         }
-      } catch (profileErr) {
+      } catch {
         if (currentUser.email) myName = currentUser.email.split("@")[0];
       }
 
-      // 3. Create pristine root conversation document
+      const participantNames = { [currentUser.uid]: myName };
+      selectedUsers.forEach(u => { participantNames[u.uid] = u.fullName || "User"; });
+
+      const unread = { [currentUser.uid]: false };
+      selectedUsers.forEach(u => { unread[u.uid] = true; });
+
       const newConvRef = await addDoc(collection(db, "conversations"), {
-        participants: [currentUser.uid, selectedUser.uid],
-        participantNames: {
-          [currentUser.uid]: myName,
-          [selectedUser.uid]: selectedUser.fullName || "User"
-        },
+        participants: [currentUser.uid, ...selectedUsers.map(u => u.uid)],
+        participantNames,
+        isGroup: group,
+        groupName: group ? groupName.trim() : "",
         preview: newText.trim(),
         category: "Courses",
         updatedAt: serverTimestamp(),
-        unread: {
-          [selectedUser.uid]: true,
-          [currentUser.uid]: false
-        }
+        unread
       });
 
-      // 4. Create the nested initial message document
       await addDoc(collection(db, "conversations", newConvRef.id, "messages"), {
         senderId: currentUser.uid,
         text: newText.trim(),
@@ -261,17 +305,22 @@ export default function Messaging() {
 
       setActiveId(newConvRef.id);
       setShowNewMsg(false);
-      setSelectedUser(null);
-      setSearchName("");
-      setNewText("");
+      resetNewMsgForm();
     } catch (e) {
       console.error("Failed creating thread setup", e);
     }
   }
 
+  function resetNewMsgForm() {
+    setSelectedUsers([]);
+    setGroupName("");
+    setSearchName("");
+    setNewText("");
+  }
+
   function handleKeyDown(e) { if (e.key === "Enter") handleSend(); }
   function handleCloseThread() { setActiveId(null); }
-  function handleCancelNewThread() { setShowNewMsg(false); setSelectedUser(null); setSearchName(""); setNewText(""); }
+  function handleCancelNewThread() { setShowNewMsg(false); resetNewMsgForm(); }
   function toggleReadMore(id) { setExpandedAnnId(prev => prev === id ? null : id); }
 
   const activeThread = threads.find(t => t.id === activeId);
@@ -287,7 +336,7 @@ export default function Messaging() {
             {threads.map(t => (
               <div key={t.id} className={`thread-item ${t.id === activeId ? "active" : ""} ${t.unread?.[currentUser?.uid] ? "unread-highlight" : ""}`} onClick={() => setActiveId(t.id)}>
                 <div className="thread-meta-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h4>{t.name}</h4>
+                  <h4>{t.isGroup && "👥 "}{t.name}</h4>
                   {t.unread?.[currentUser?.uid] && <span className="unread-dot" style={{ width: "8px", height: "8px", backgroundColor: "#ff4d4d", borderRadius: "50%" }} />}
                 </div>
                 <p style={{ fontWeight: t.unread?.[currentUser?.uid] ? "bold" : "normal" }}>{t.preview}</p>
@@ -297,27 +346,47 @@ export default function Messaging() {
           <div className="msg-add-area">
             {showNewMsg ? (
               <div className="new-msg-form">
-                {!selectedUser ? (
-                  <>
-                    <input className="msg-input" placeholder="Type name to look up..." value={searchName} onChange={e => setSearchName(e.target.value)} />
-                    <div className="search-results-box" style={{ background: "var(--background-card, #fff)", border: "1px solid var(--border, #eee)", borderRadius: "4px", maxHeight: "150px", overflowY: "auto", margin: "4px 0" }}>
-                      {searchResults.length === 0 && searchName.trim() && <p style={{ padding: "8px", fontSize: "12px", color: "var(--muted)" }}>No matches found</p>}
-                      {searchResults.map(u => (
-                        <div key={u.uid} className="search-user-row" onClick={() => setSelectedUser(u)} style={{ padding: "8px", cursor: "pointer", borderBottom: "1px solid var(--border, #f9f9f9)", fontSize: "13px" }}>
-                          {u.fullName} ({u.email})
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="selected-user-tag" style={{ display: "flex", justifyContent: "space-between", padding: "6px 8px", background: "var(--accent-light, #eef2ff)", borderRadius: "4px", fontSize: "13px", marginBottom: "6px" }}>
-                    <span>To: <strong>{selectedUser.fullName}</strong></span>
-                    <button onClick={() => setSelectedUser(null)} style={{ border: "none", background: "none", cursor: "pointer" }}>✕</button>
+                {selectedUsers.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "6px" }}>
+                    {selectedUsers.map(u => (
+                      <span key={u.uid} style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px 8px", background: "var(--accent-light, #eef2ff)", borderRadius: "999px", fontSize: "12px" }}>
+                        {u.fullName}
+                        <button onClick={() => removeSelectedUser(u.uid)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "12px", lineHeight: 1 }}>✕</button>
+                      </span>
+                    ))}
                   </div>
                 )}
+
+                <input
+                  className="msg-input"
+                  placeholder={selectedUsers.length > 0 ? "Add another person..." : "Type name to look up..."}
+                  value={searchName}
+                  onChange={e => setSearchName(e.target.value)}
+                />
+                <div className="search-results-box" style={{ background: "var(--background-card, #fff)", border: "1px solid var(--border, #eee)", borderRadius: "4px", maxHeight: "150px", overflowY: "auto", margin: "4px 0" }}>
+                  {searchResults.length === 0 && searchName.trim() && <p style={{ padding: "8px", fontSize: "12px", color: "var(--muted)" }}>No matches found</p>}
+                  {searchResults.map(u => (
+                    <div key={u.uid} className="search-user-row" onClick={() => toggleSelectedUser(u)} style={{ padding: "8px", cursor: "pointer", borderBottom: "1px solid var(--border, #f9f9f9)", fontSize: "13px" }}>
+                      {u.fullName} ({u.email})
+                    </div>
+                  ))}
+                </div>
+
+                {isGroupDraft && (
+                  <input
+                    className="msg-input"
+                    placeholder="Group name (optional)"
+                    value={groupName}
+                    onChange={e => setGroupName(e.target.value)}
+                    style={{ marginTop: "4px" }}
+                  />
+                )}
+
                 <textarea className="new-msg-textarea" placeholder="Type your first message..." value={newText} onChange={e => setNewText(e.target.value)}></textarea>
                 <div className="new-msg-actions">
-                  <button className="btn-send" onClick={handleCreateThread} disabled={!selectedUser}>Start</button>
+                  <button className="btn-send" onClick={handleCreateThread} disabled={selectedUsers.length === 0}>
+                    {isGroupDraft ? "Create Group" : "Start"}
+                  </button>
                   <button className="btn-cancel" onClick={handleCancelNewThread}>Cancel</button>
                 </div>
               </div>
@@ -334,15 +403,24 @@ export default function Messaging() {
           {activeThread ? (
             <>
               <div className="msg-top">
-                <h3><UserIcon /> {activeThread.name}</h3>
+                <h3>{activeThread.isGroup ? <GroupIcon /> : <UserIcon />} {activeThread.name}</h3>
                 <button className="close-x" onClick={handleCloseThread}>✕</button>
               </div>
               <div className="msg-body">
-                {messages.map((msg) => (
-                  <div key={msg.id} className={msg.senderId === currentUser?.uid ? "bubble-out" : "bubble-in"}>
-                    {msg.text}
-                  </div>
-                ))}
+                {messages.map((msg) => {
+                  const isMine = msg.senderId === currentUser?.uid;
+                  const senderName = activeThread.participantNames?.[msg.senderId];
+                  return (
+                    <div key={msg.id} className={isMine ? "bubble-out" : "bubble-in"}>
+                      {activeThread.isGroup && !isMine && (
+                        <div style={{ fontSize: "11px", fontWeight: 600, opacity: 0.7, marginBottom: "2px" }}>
+                          {senderName}
+                        </div>
+                      )}
+                      {msg.text}
+                    </div>
+                  );
+                })}
                 <div ref={messagesEndRef} />
               </div>
               <div className="msg-composer">
