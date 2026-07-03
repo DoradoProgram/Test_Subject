@@ -193,8 +193,14 @@ export default function Dashboard() {
           </Link>
           <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Unread Messages</div>
-            <div className="value">{unreadCount}</div>
-            <div className="sub">{unreadCount > 0 ? "Tap to view inbox" : "You're all caught up"}</div>
+            <div className="value">{notifPrefs.directMessages ? unreadCount : "—"}</div>
+            <div className="sub">
+              {!notifPrefs.directMessages
+                ? "Notifications turned off"
+                : unreadCount > 0
+                  ? "Tap to view inbox"
+                  : "You're all caught up"}
+            </div>
           </Link>
           <Link to="/messaging" className="stat-card" style={{ textDecoration: "none", color: "inherit" }}>
             <div className="label">Announcements</div>

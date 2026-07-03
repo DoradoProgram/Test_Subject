@@ -3,7 +3,6 @@ import AppLayout from "../layouts/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { signOut } from "firebase/auth";
 import { useTheme } from "../context/ThemeContext";
 import { useUnread } from "../context/UnreadContext";
 
@@ -67,11 +66,6 @@ export default function Settings() {
     const updated = { ...notifs, [key]: !notifs[key] };
     setNotifs(updated);
     saveSettings(theme, updated);
-  }
-
-  async function handleLogout() {
-    await signOut(auth);
-    navigate("/login");
   }
 
   function Toggle({ on, onClick }) {
@@ -164,20 +158,6 @@ export default function Settings() {
                 <Toggle on={notifs[item.key]} onClick={() => handleToggle(item.key)} />
               </div>
             ))}
-          </div>
-
-          <div className="settings-section">
-            <h2>Account</h2>
-            <div className="settings-divider"></div>
-            <button className="logout-btn" onClick={handleLogout}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Logout
-            </button>
-            <div className="logout-hint">You will be returned to the login screen.</div>
           </div>
         </div>
       </div>

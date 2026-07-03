@@ -1,13 +1,48 @@
 import { useState, useEffect, useRef } from "react";
 import AppLayout from "../layouts/AppLayout";
-import { Link } from "react-router-dom";
-import { auth, db, storage } from "../firebase";
+import { Link, useNavigate } from "react-router-dom";
+import { auth, db } from "../firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+const MAX_DIMENSION = 200;
+const JPEG_QUALITY = 0.6;
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > height && width > MAX_DIMENSION) {
+          height = Math.round((height * MAX_DIMENSION) / width);
+          width = MAX_DIMENSION;
+        } else if (height > MAX_DIMENSION) {
+          width = Math.round((width * MAX_DIMENSION) / height);
+          height = MAX_DIMENSION;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function Profile() {
+  const navigate = useNavigate();
   const [form, setForm] = useState({ fullName: "", studentId: "", email: "", course: "", bio: "" });
-  const [avatar, setAvatar] = useState(null);
   const [preview, setPreview] = useState(null);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
@@ -34,12 +69,17 @@ export default function Profile() {
     fetchProfile();
   }, []);
 
-  function handlePhotoChange(e) {
+  async function handlePhotoChange(e) {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) { setError("Image must be under 2MB."); return; }
-    setAvatar(file);
-    setPreview(URL.createObjectURL(file));
+
+    try {
+      const compressed = await compressImage(file);
+      setPreview(compressed);
+    } catch {
+      setError("Could not process that image. Try a different file.");
+    }
   }
 
   async function handleSave(e) {
@@ -51,23 +91,12 @@ export default function Profile() {
     setSuccess("");
 
     try {
-      let avatarUrl = preview;
-
-      // Upload the new photo to Firebase Storage and store just the URL in
-      // Firestore. Keeps documents small and avoids the 1MB Firestore
-      // document-size limit that large base64 images could hit.
-      if (avatar) {
-        const avatarRef = ref(storage, `avatars/${user.uid}`);
-        await uploadBytes(avatarRef, avatar);
-        avatarUrl = await getDownloadURL(avatarRef);
-      }
-
       await updateDoc(doc(db, "users", user.uid), {
         fullName: form.fullName,
         studentId: form.studentId,
         course: form.course,
         bio: form.bio,
-        avatarUrl: avatarUrl || "",
+        avatarUrl: preview || "",
       });
 
       setSuccess("Profile updated successfully!");
@@ -80,9 +109,7 @@ export default function Profile() {
   }
 
   function handleCancel() {
-    setAvatar(null);
-    setError("");
-    setSuccess("");
+    navigate("/dashboard");
   }
 
   return (
