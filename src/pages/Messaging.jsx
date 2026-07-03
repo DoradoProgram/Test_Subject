@@ -5,7 +5,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useNotifPrefs } from "../context/NotifPrefsContext";
 import {
   collection, query, orderBy, limit, getDocs, doc,
-  addDoc, serverTimestamp, onSnapshot, where, updateDoc
+  addDoc, serverTimestamp, onSnapshot, where, updateDoc,
+  deleteDoc, arrayUnion
 } from "firebase/firestore";
 
 function timeAgo(timestamp) {
@@ -23,9 +24,6 @@ function timeAgo(timestamp) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-// Builds a readable thread name. For a 1-on-1 chat it's just the other
-// person's name. For a group, it's the explicit group name if set,
-// otherwise a comma-joined list of everyone else in the chat.
 function threadDisplayName(thread, currentUid) {
   if (thread.isGroup) {
     if (thread.groupName?.trim()) return thread.groupName.trim();
@@ -57,6 +55,14 @@ const GroupIcon = () => (
   </svg>
 );
 
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+    <path d="M10 11v6M14 11v6"/>
+  </svg>
+);
+
 export default function Messaging() {
   const [currentUser, setCurrentUser] = useState(null);
   const { notifPrefs } = useNotifPrefs();
@@ -70,13 +76,19 @@ export default function Messaging() {
   const [annLoading, setAnnLoading] = useState(true);
   const [expandedAnnId, setExpandedAnnId] = useState(null);
 
-  // New Chat states — selectedUsers is now an array to support groups
+  // New Chat states
   const [showNewMsg, setShowNewMsg] = useState(false);
   const [searchName, setSearchName] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [groupName, setGroupName] = useState("");
   const [newText, setNewText] = useState("");
+
+  // Add-member states (for an existing group)
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [addMemberSearch, setAddMemberSearch] = useState("");
+  const [addMemberResults, setAddMemberResults] = useState([]);
+  const [addingMember, setAddingMember] = useState(false);
 
   const messagesEndRef = useRef(null);
   const isGroupDraft = selectedUsers.length > 1;
@@ -89,7 +101,7 @@ export default function Messaging() {
     return () => unsubscribeAuth();
   }, []);
 
-  // 1b. Announcements fetch (respects the "Announcements" notification preference)
+  // 1b. Announcements fetch
   useEffect(() => {
     if (!currentUser) return;
 
@@ -174,7 +186,7 @@ export default function Messaging() {
     return () => unsubscribeMessages();
   }, [activeId, currentUser]);
 
-  // 4. Case-insensitive "contains" user search
+  // 4. Case-insensitive "contains" user search (New Message)
   useEffect(() => {
     if (!searchName.trim()) {
       setSearchResults([]);
@@ -203,7 +215,36 @@ export default function Messaging() {
     return () => clearTimeout(delayDebounce);
   }, [searchName, currentUser, selectedUsers]);
 
-  // Send Message Dispatcher — now marks unread for every other participant
+  // 5. Search for the "Add member" panel on an existing group
+  useEffect(() => {
+    if (!showAddMember || !addMemberSearch.trim() || !currentUser) {
+      setAddMemberResults([]);
+      return;
+    }
+    const activeThread = threads.find(t => t.id === activeId);
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const needle = addMemberSearch.trim().toLowerCase();
+        const snap = await getDocs(collection(db, "users"));
+
+        setAddMemberResults(
+          snap.docs
+            .map(d => ({ uid: d.id, ...d.data() }))
+            .filter(u =>
+              !activeThread?.participants.includes(u.uid) &&
+              (u.fullName || "").toLowerCase().includes(needle)
+            )
+            .slice(0, 20)
+        );
+      } catch (e) {
+        console.error("Add-member search failed", e);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [addMemberSearch, showAddMember, activeId, threads, currentUser]);
+
+  // Send Message Dispatcher
   async function handleSend() {
     if (!input.trim() || !activeId || !currentUser) return;
 
@@ -233,6 +274,35 @@ export default function Messaging() {
     }
   }
 
+  // Delete a single message (only the sender can, enforced by rules too)
+  async function handleDeleteMessage(msgId) {
+    if (!window.confirm("Delete this message? This can't be undone.")) return;
+    try {
+      await deleteDoc(doc(db, "conversations", activeId, "messages", msgId));
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  }
+
+  // Delete an entire conversation (group or 1-on-1)
+  async function handleDeleteConversation(threadId) {
+    const isCurrentlyOpen = threadId === activeId;
+    const confirmMsg = "Delete this entire conversation for everyone? This can't be undone.";
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      // Clean up every message doc first, then the conversation itself
+      const msgsSnap = await getDocs(collection(db, "conversations", threadId, "messages"));
+      await Promise.all(msgsSnap.docs.map(m => deleteDoc(m.ref)));
+      await deleteDoc(doc(db, "conversations", threadId));
+
+      if (isCurrentlyOpen) setActiveId(null);
+    } catch (err) {
+      console.error("Failed to delete conversation:", err);
+      alert("Couldn't delete this conversation. You may not have permission.");
+    }
+  }
+
   function toggleSelectedUser(user) {
     setSelectedUsers(prev =>
       prev.some(u => u.uid === user.uid)
@@ -247,14 +317,36 @@ export default function Messaging() {
     setSelectedUsers(prev => prev.filter(u => u.uid !== uid));
   }
 
-  // Conversation Generator — supports 1-on-1 (existing behavior) and groups
+  // Add a member to the currently open group conversation
+  async function handleAddMember(user) {
+    if (!activeId || addingMember) return;
+    setAddingMember(true);
+    try {
+      await updateDoc(doc(db, "conversations", activeId), {
+        participants: arrayUnion(user.uid),
+        [`participantNames.${user.uid}`]: user.fullName || "User",
+        [`unread.${user.uid}`]: true,
+        isGroup: true,
+        updatedAt: serverTimestamp()
+      });
+      setAddMemberSearch("");
+      setAddMemberResults([]);
+      setShowAddMember(false);
+    } catch (err) {
+      console.error("Failed to add member:", err);
+      alert("Couldn't add that member.");
+    } finally {
+      setAddingMember(false);
+    }
+  }
+
+  // Conversation Generator — supports 1-on-1 and groups
   async function handleCreateThread() {
     if (selectedUsers.length === 0 || !newText.trim() || !currentUser) return;
 
     const group = selectedUsers.length > 1;
 
     try {
-      // For 1-on-1 chats only: reuse an existing thread with that same person
       if (!group) {
         const existing = threads.find(t =>
           !t.isGroup &&
@@ -269,7 +361,6 @@ export default function Messaging() {
         }
       }
 
-      // Fetch sender's own display name
       let myName = "Student";
       try {
         const myDoc = await getDocs(query(collection(db, "users"), where("__name__", "==", currentUser.uid)));
@@ -319,7 +410,7 @@ export default function Messaging() {
   }
 
   function handleKeyDown(e) { if (e.key === "Enter") handleSend(); }
-  function handleCloseThread() { setActiveId(null); }
+  function handleCloseThread() { setActiveId(null); setShowAddMember(false); }
   function handleCancelNewThread() { setShowNewMsg(false); resetNewMsgForm(); }
   function toggleReadMore(id) { setExpandedAnnId(prev => prev === id ? null : id); }
 
@@ -337,7 +428,16 @@ export default function Messaging() {
               <div key={t.id} className={`thread-item ${t.id === activeId ? "active" : ""} ${t.unread?.[currentUser?.uid] ? "unread-highlight" : ""}`} onClick={() => setActiveId(t.id)}>
                 <div className="thread-meta-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <h4>{t.isGroup && "👥 "}{t.name}</h4>
-                  {t.unread?.[currentUser?.uid] && <span className="unread-dot" style={{ width: "8px", height: "8px", backgroundColor: "#ff4d4d", borderRadius: "50%" }} />}
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    {t.unread?.[currentUser?.uid] && <span className="unread-dot" style={{ width: "8px", height: "8px", backgroundColor: "#ff4d4d", borderRadius: "50%" }} />}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteConversation(t.id); }}
+                      title="Delete conversation"
+                      style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", padding: "2px", display: "flex" }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
                 </div>
                 <p style={{ fontWeight: t.unread?.[currentUser?.uid] ? "bold" : "normal" }}>{t.preview}</p>
               </div>
@@ -404,20 +504,74 @@ export default function Messaging() {
             <>
               <div className="msg-top">
                 <h3>{activeThread.isGroup ? <GroupIcon /> : <UserIcon />} {activeThread.name}</h3>
-                <button className="close-x" onClick={handleCloseThread}>✕</button>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  {activeThread.isGroup && (
+                    <button
+                      onClick={() => setShowAddMember(s => !s)}
+                      title="Add member"
+                      style={{ border: "1px solid var(--border, #ddd)", background: "none", borderRadius: "6px", cursor: "pointer", padding: "4px 8px", fontSize: "12px", display: "flex", alignItems: "center", gap: "4px" }}
+                    >
+                      <PlusIcon /> Add
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDeleteConversation(activeThread.id)}
+                    title="Delete conversation"
+                    style={{ border: "none", background: "none", cursor: "pointer", color: "var(--muted)", display: "flex" }}
+                  >
+                    <TrashIcon />
+                  </button>
+                  <button className="close-x" onClick={handleCloseThread}>✕</button>
+                </div>
               </div>
+
+              {showAddMember && (
+                <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border, #eee)" }}>
+                  <input
+                    className="msg-input"
+                    placeholder="Search a name to add..."
+                    value={addMemberSearch}
+                    onChange={e => setAddMemberSearch(e.target.value)}
+                    autoFocus
+                  />
+                  <div style={{ maxHeight: "140px", overflowY: "auto", marginTop: "4px" }}>
+                    {addMemberResults.length === 0 && addMemberSearch.trim() && (
+                      <p style={{ padding: "6px 4px", fontSize: "12px", color: "var(--muted)" }}>No matches found</p>
+                    )}
+                    {addMemberResults.map(u => (
+                      <div
+                        key={u.uid}
+                        onClick={() => handleAddMember(u)}
+                        style={{ padding: "8px", cursor: "pointer", borderBottom: "1px solid var(--border, #f9f9f9)", fontSize: "13px" }}
+                      >
+                        {u.fullName} ({u.email})
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="msg-body">
                 {messages.map((msg) => {
                   const isMine = msg.senderId === currentUser?.uid;
                   const senderName = activeThread.participantNames?.[msg.senderId];
                   return (
-                    <div key={msg.id} className={isMine ? "bubble-out" : "bubble-in"}>
+                    <div key={msg.id} className={isMine ? "bubble-out" : "bubble-in"} style={{ position: "relative", paddingRight: isMine ? "24px" : undefined }}>
                       {activeThread.isGroup && !isMine && (
                         <div style={{ fontSize: "11px", fontWeight: 600, opacity: 0.7, marginBottom: "2px" }}>
                           {senderName}
                         </div>
                       )}
                       {msg.text}
+                      {isMine && (
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          title="Delete message"
+                          style={{ position: "absolute", top: "4px", right: "4px", border: "none", background: "none", cursor: "pointer", opacity: 0.6, color: "inherit", display: "flex", padding: 0 }}
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
