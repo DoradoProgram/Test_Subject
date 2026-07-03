@@ -109,3 +109,8 @@
   .btn-row { flex-direction: column; }
   .btn-row .btn-submit, .btn-row .btn-cancel { width: 100%; }
 }
+
+[data-theme="dark"] .mobile-topbar,
+[data-theme="dark"] .mobile-topbar span {
+    color: #ffffff !important;
+}
