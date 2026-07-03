@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useUnread } from "../context/UnreadContext";
+import { useAdmin } from "../context/AdminContext";
 
 const NAV_ITEMS = [
   {
@@ -68,9 +69,20 @@ const NAV_ITEMS = [
   },
 ];
 
+const ADMIN_ITEM = {
+  to: "/admin",
+  label: "Admin Panel",
+  icon: (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6z"/>
+    </svg>
+  ),
+};
+
 export default function Sidebar() {
   const { pathname } = useLocation();
   const { unreadCount } = useUnread();
+  const { isAdmin } = useAdmin();
 
   // Treat sub-routes safely as active pointers
   const active = (to) => {
@@ -80,6 +92,8 @@ export default function Sidebar() {
     return pathname === to;
   };
 
+  const navItems = isAdmin ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
+
   return (
     <div className="sidebar">
       <div className="sidebar-logo">
@@ -87,7 +101,7 @@ export default function Sidebar() {
         <span>Campus<br />Connect</span>
       </div>
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map(({ to, label, icon, badge }) => (
+        {navItems.map(({ to, label, icon, badge }) => (
           <Link key={to} to={to} className={`nav-item ${active(to) ? "active" : ""}`}>
             <div className="nav-icon-wrapper" style={{ position: "relative", display: "flex", alignItems: "center" }}>
               {icon}

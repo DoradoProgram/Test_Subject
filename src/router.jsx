@@ -13,6 +13,7 @@ import Profile from "./pages/Profile";
 import ProfilePassword from "./pages/ProfilePassword";
 import Settings from "./pages/Settings";
 import Messaging from "./pages/Messaging";
+import Admin from "./pages/Admin";
 
 export default function Router() {
   return (
@@ -32,6 +33,7 @@ export default function Router() {
         <Route path="/profile-password" element={<ProfilePassword />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/messaging" element={<Messaging />} />
+        <Route path="/admin" element={<Admin />} />
       </Routes>
     </BrowserRouter>
   );
