@@ -353,6 +353,17 @@
   border-radius: 3px; padding: 2px 5px; margin-top: 3px;
   display: block; white-space: normal; overflow: visible; text-overflow: unset;
 }
+/* Dark mode - Event Calendar */
+[data-theme="dark"] .event-pill {
+    background: rgba(230, 25, 76, 0.25);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .event-pill:hover {
+    background: rgba(230, 25, 76, 0.4);
+}
+
 .events-sidebar {
   background: var(--white); border: 1.5px solid var(--border);
   border-radius: var(--r-lg); padding: 16px;
