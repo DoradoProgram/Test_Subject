@@ -1,0 +1,111 @@
+/* ─── MOBILE RESPONSIVE ─── */
+/* Breakpoints: 768px = tablet/phone switch, 480px = small phone tweaks */
+.mobile-topbar {
+  display: none;
+ }
+ 
+@media (max-width: 768px) {
+ 
+  /* ── APP LAYOUT / SIDEBAR → SLIDE-OUT DRAWER ── */
+  .app-layout { display: block; }
+
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    height: 100vh;
+    width: 240px;
+    min-width: 240px;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+    z-index: 1000;
+    box-shadow: var(--shadow-md);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 999;
+  }
+  .sidebar-backdrop.show { display: block; }
+
+  .main-content { width: 100%; }
+
+  /* Mobile top bar with hamburger */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--nav);
+    position: sticky;
+    top: 0;
+    z-index: 500;
+  }
+  .mobile-topbar button {
+    background: none; border: none; cursor: pointer;
+    color: var(--white); display: flex; align-items: center;
+  }
+  .mobile-topbar span {
+    font-family: var(--font-d); font-weight: 700; color: var(--white); font-size: 15px;
+  }
+
+  /* ── TOP HEADER / PAGE BODY ── */
+  .top-header { padding: 14px 16px; flex-wrap: wrap; gap: 10px; }
+  .top-header-left h2 { font-size: 18px; }
+  .page-body { padding: 16px; }
+  .tab-content { padding: 16px; }
+
+  /* ── DASHBOARD ── */
+  .stat-cards { grid-template-columns: 1fr; gap: 12px; }
+  .dash-grid { grid-template-columns: 1fr; }
+
+  /* ── SCHEDULE (weekly grid) ── */
+  .weekly-grid { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .weekly-grid table { min-width: 640px; }
+
+  /* ── EVENT CALENDAR ── */
+  .cal-wrapper { grid-template-columns: 1fr; }
+  .cal-grid { overflow-x: auto; }
+  .cal-grid table { min-width: 480px; }
+  .events-sidebar { order: -1; }
+
+  /* ── MESSAGING ── */
+  .messaging-layout { grid-template-columns: 1fr; }
+  .msg-sidebar, .ann-panel {
+    border-right: none; border-left: none;
+    border-bottom: 1.5px solid var(--border);
+    max-height: 240px;
+  }
+  .bubble-in, .bubble-out { max-width: 85%; }
+
+  /* ── PROFILE ── */
+  .profile-layout { grid-template-columns: 1fr; gap: 20px; }
+  .avatar-section { flex-direction: row; justify-content: center; }
+
+  /* ── SETTINGS ── */
+  .theme-cards { grid-template-columns: 1fr 1fr; }
+
+  /* ── AUTH ── */
+  .auth-card { width: 100%; max-width: 400px; padding: 32px 24px; }
+
+  /* ── SERVICES ── */
+  .services-content { max-width: 100%; }
+
+  /* ── MODALS (Add Event / Add Class forms) ── */
+  div[style*="width: 360px"],
+  div[style*="width: 400px"] {
+    width: 90vw !important;
+    max-width: 400px;
+  }
+}
+
+@media (max-width: 480px) {
+  .theme-cards { grid-template-columns: 1fr; }
+  .auth-card { padding: 24px 18px; }
+  .stat-card .value { font-size: 28px; }
+  .btn-row { flex-direction: column; }
+  .btn-row .btn-submit, .btn-row .btn-cancel { width: 100%; }
+}

@@ -5,6 +5,7 @@ import { AdminProvider } from "./context/AdminContext";
 import Router from "./router";
 import "./App.css";
 import "./styles/styles.css";
+import "./styles/mobile.css";
 
 function App() {
   return (

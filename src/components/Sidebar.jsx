@@ -79,7 +79,7 @@ const ADMIN_ITEM = {
   ),
 };
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const { pathname } = useLocation();
   const { unreadCount } = useUnread();
   const { isAdmin } = useAdmin();
@@ -95,14 +95,14 @@ export default function Sidebar() {
   const navItems = isAdmin ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-logo">
         <img src="/logo.png" alt="Logo" />
         <span>Campus<br />Connect</span>
       </div>
       <nav className="sidebar-nav">
         {navItems.map(({ to, label, icon, badge }) => (
-          <Link key={to} to={to} className={`nav-item ${active(to) ? "active" : ""}`}>
+          <Link key={to} to={to} className={`nav-item ${active(to) ? "active" : ""}`} onClick={onClose}>
             <div className="nav-icon-wrapper" style={{ position: "relative", display: "flex", alignItems: "center" }}>
               {icon}
               {badge && unreadCount > 0 && (
@@ -133,7 +133,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-bottom">
-        <Link to="/login" className="sign-out-btn">
+        <Link to="/login" className="sign-out-btn" onClick={onClose}>
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
             <polyline points="16 17 21 12 16 7"/>
